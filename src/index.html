@@ -20214,6 +20214,8 @@ table.plan td.vg{font-size:.75rem;color:var(--muted);width:90px}
 .caption{font-size:.85rem;color:var(--muted);max-width:72ch;margin:0}
 .status{font-size:.82rem;color:var(--muted);margin-top:8px;min-height:1.2em}
 .status.err{color:var(--crit)}
+details.vlog{margin-top:12px;border:1px solid var(--line);padding:8px 12px}details.vlog summary{cursor:pointer;font-weight:600}
+.vlog h4{margin:12px 0 4px}.vlog h4 small{font-weight:400;color:var(--muted)}.vlog ul{margin:0 0 6px;padding-left:18px;font-size:.88rem;display:grid;gap:3px}.vlog .rj{color:var(--muted)}
 /* Vorgaben */
 .vorgaben{overflow-x:auto}
 table.vg{border-collapse:collapse;font-size:.8rem;font-variant-numeric:tabular-nums}
@@ -20266,6 +20268,7 @@ table.set input{width:90px}
     </aside>
   </div>
   <div class="status" id="status"></div>
+  <details class="vlog"><summary>Protokoll des letzten Vorschlags</summary><p class="caption">Zeigt, warum der Vorschlag Dienste gesetzt oder nicht gesetzt hat – zur Fehlersuche bei Regeln. Wird nicht gespeichert und beim Monatswechsel geleert.</p><div id="vlog"></div></details>
 </div>
 
 <div class="panel" id="tab-vorgaben" hidden>
@@ -20349,14 +20352,15 @@ async function dbSaveMonth(k,m){var d,pid;
   await DB.execute("DELETE FROM vorgaben WHERE monat=$1",[k]);for(pid in m.vg||{})for(d in m.vg[pid])if(m.vg[pid][d])await DB.execute("INSERT INTO vorgaben (monat,person,tag,art,stichwort) VALUES ($1,$2,$3,$4,$5)",[k,pid,+d,m.vg[pid][d],((m.termin||{})[pid]||{})[d]||null]);
   await DB.execute("DELETE FROM notizen WHERE monat=$1",[k]);for(d in m.notes||{})if(m.notes[d])await DB.execute("INSERT INTO notizen (monat,tag,text) VALUES ($1,$2,$3)",[k,+d,m.notes[d]]);
   await DB.execute("DELETE FROM abweichungen WHERE monat=$1",[k]);for(pid in m.ovr||{})for(var f in m.ovr[pid])if(m.ovr[pid][f]!==undefined&&m.ovr[pid][f]!==null&&m.ovr[pid][f]!=="")await DB.execute("INSERT INTO abweichungen (monat,person,feld,wert) VALUES ($1,$2,$3,$4)",[k,pid,f,+m.ovr[pid][f]])}
-var saveTimer=null,saving=false,dirtyAgain=false;
+var saveTimer=null,saving=false,dirtyAgain=false,dirtyMonths={};
 function save(){
   if(!DB){try{localStorage.setItem(KEY,JSON.stringify(S));status("Gespeichert "+new Date().toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}))}catch(e){status("Speichern im Browser nicht möglich – bitte Sicherung nutzen.",true)}return}
+  dirtyMonths[key(Y,M)]=cur; // Monat sofort merken, sonst speichert der Timer nach einem Monatswechsel den falschen
   clearTimeout(saveTimer);saveTimer=setTimeout(saveNow,250)}
-async function saveNow(){if(saving){dirtyAgain=true;return}saving=true;
-  try{await DB.execute("BEGIN");await DB.execute("DELETE FROM personen");for(var i=0;i<S.persons.length;i++)await dbSavePerson(S.persons[i],i);await dbSaveMonth(key(Y,M),cur);await DB.execute("COMMIT");
+async function saveNow(){if(saving){dirtyAgain=true;return}saving=true;var q=dirtyMonths;dirtyMonths={};
+  try{await DB.execute("BEGIN");await DB.execute("DELETE FROM personen");for(var i=0;i<S.persons.length;i++)await dbSavePerson(S.persons[i],i);for(var k in q)await dbSaveMonth(k,q[k]);await DB.execute("COMMIT");
     status("Gespeichert "+new Date().toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}))}
-  catch(e){try{await DB.execute("ROLLBACK")}catch(e2){}status("Speichern fehlgeschlagen: "+(e&&e.message||e),true)}
+  catch(e){try{await DB.execute("ROLLBACK")}catch(e2){}for(var k2 in q)if(!dirtyMonths[k2])dirtyMonths[k2]=q[k2];status("Speichern fehlgeschlagen: "+(e&&e.message||e),true)}
   saving=false;if(dirtyAgain){dirtyAgain=false;saveNow()}}
 async function initStore(){
   var info=document.getElementById("storeInfo");
@@ -20384,7 +20388,7 @@ function holidays(y,m){ // Mecklenburg-Vorpommern
   return H}
 var HOL={}, N=30;
 function isWe(d){var w=dow(d);return w===0||w===6||!!HOL[d]}
-function setMonth(y,m){Y=y;M=m;N=dim(y,m);HOL=holidays(y,m);cur=month(y,m);undo=[];selected=null;
+function setMonth(y,m){Y=y;M=m;N=dim(y,m);HOL=holidays(y,m);cur=month(y,m);undo=[];selected=null;VL=null;
   var pk=prevKey(),pm=S.months[pk];if(!cur.prevNight&&pm){var ld=dim(y+(m===0?-1:0),(m+11)%12);if(pm.plan[ld])cur.prevNight=pm.plan[ld]}
   document.getElementById("monthLabel").textContent=MN[m]+" "+y;renderAll()}
 function prevKey(){return M===0?key(Y-1,11):key(Y,M-1)}
@@ -20443,7 +20447,7 @@ function hints(s){
   return h}
 
 /* ---------- Rendern ---------- */
-function renderAll(){renderPlan();renderVg();renderSettings()}
+function renderAll(){renderPlan();renderVg();renderSettings();renderLog()}
 function renderPlan(){
   var tb=document.getElementById("rows"),html="",d;
   for(d=1;d<=N;d++){var w=dow(d),night=cur.plan[d]||"",prev=d===1?(cur.prevNight||""):(cur.plan[d-1]||"");
@@ -20458,12 +20462,12 @@ function renderPlan(){
 function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function konto(){
   var s=stats(),out="",max=220;
-  S.persons.forEach(function(p,i){var st=s[p.id];if(!p.aktiv&&!st.n)return;var diff=st.ist-p.soll,cls=diff===0?"ok":(diff>0?"over":"under");
-    out+='<div class="person"><span class="chip p'+(i%10)+(p.aktiv?"":" off")+'">'+esc(p.name)+'</span><div class="bar"><i style="width:'+Math.min(100,Math.max(0,st.ist)/max*100)+'%"></i><b style="left:'+Math.min(100,p.soll/max*100)+'%"></b></div>'+
-      '<div class="val '+cls+'">'+st.ist+' / '+p.soll+' h<small>'+st.n+' Dienste · '+st.weN+' WE'+(st.ueb?' · Übertrag '+(st.ueb>0?"+":"")+st.ueb:'')+' · '+(diff>0?"+":"")+diff+' h</small></div></div>'});
+  S.persons.forEach(function(p,i){var st=s[p.id];if(!p.aktiv&&!st.n)return;var soll=st.soll,diff=st.ist-soll,cls=diff===0?"ok":(diff>0?"over":"under");
+    out+='<div class="person"><span class="chip p'+(i%10)+(p.aktiv?"":" off")+'">'+esc(p.name)+'</span><div class="bar"><i style="width:'+Math.min(100,Math.max(0,st.ist)/max*100)+'%"></i><b style="left:'+Math.min(100,soll/max*100)+'%"></b></div>'+
+      '<div class="val '+cls+'">'+st.ist+' / '+soll+' h<small>'+st.n+' Dienste · '+st.weN+' WE'+(st.ueb?' · Übertrag '+(st.ueb>0?"+":"")+st.ueb:'')+' · '+(diff>0?"+":"")+diff+' h</small></div></div>'});
   document.getElementById("konto").innerHTML=out;
   document.getElementById("hints").innerHTML=hints(s).map(function(x){return '<div class="hint '+x[0]+'"><i></i><span>'+esc(x[1])+'</span></div>'}).join("");
-  var soll=0,ist=0;active().forEach(function(p){soll+=p.soll});for(var kk in s)ist+=s[kk].h;var avail=N*20,dB=avail-soll;
+  var soll=0,ist=0;active().forEach(function(p){soll+=sollOf(p)});for(var kk in s)ist+=s[kk].h;var avail=N*20,dB=avail-soll;
   document.getElementById("bilanz").innerHTML='<dt>Dienste im Monat</dt><dd>'+N+' × 20 h = '+avail+' h</dd><dt>Soll-Summe Team</dt><dd>'+soll+' h</dd><dt>Verplant</dt><dd>'+ist+' h</dd><dt class="sum">Differenz Monat</dt><dd class="sum">'+(dB>0?"+":"")+dB+' h'+(dB<0?" · Urlaub empfehlen":(dB>0?" · zu verteilen (Soll erhöhen oder Aushilfe)":" · passt"))+'</dd>'}
 
 function push(){undo.push(JSON.stringify(cur.plan));if(undo.length>50)undo.shift()}
@@ -20488,55 +20492,102 @@ function clearSel(){selected=null;Array.prototype.forEach.call(document.querySel
 document.addEventListener("click",function(e){if(selected&&!e.target.closest("td.drop")&&!e.target.closest(".chip"))clearSel()});
 
 /* ---------- Vorschlag ---------- */
+var VL=null; // Protokoll des letzten Vorschlags, nur im Speicher
 function vorschlag(){
-  var plan={},d,i;
+  var plan={},d,i,stp="";
+  var L={gen:[],per:{}};VL=L;
   function free(dd){return dd>=1&&dd<=N&&!plan[dd]}
   function weS(p){var n=0;for(var k=1;k<=N;k++){var w=dow(k);if(plan[k]===p.id&&(w===5||w===6||w===0))n++}return n}
-  function ok(p,dd){if(!(free(dd)&&!blocked(p.id,dd)&&dayOk(p,dd)))return false;var w=dow(dd),m=eff(p,"weDienstMax");if(m!==null&&(w===5||w===6||w===0)&&weS(p)>=m)return false;return true}
+  function ok0(p,dd){if(!(free(dd)&&!blocked(p.id,dd)&&dayOk(p,dd)))return false;var w=dow(dd),m=eff(p,"weDienstMax");if(m!==null&&(w===5||w===6||w===0)&&weS(p)>=m)return false;return true}
+  // Protokoll: Grund, warum ok0 nein sagt (gleiche Reihenfolge wie ok0)
+  function why(p,dd){if(dd<1||dd>N)return null;if(plan[dd])return plan[dd]===p.id?null:"schon belegt";var a=vg(p.id,dd);if(a==="U"||a==="F")return "Urlaub/Wunschfrei";if(blocked(p.id,dd))return "Urlaub/Wunschfrei am Folgetag";if(!dayOk(p,dd))return "Wochentag nicht erlaubt";if(!ok0(p,dd))return "WE-Dienste max. erreicht";return null}
+  function E(p){return L.per[p.id]||(L.per[p.id]={rules:ruleSummary(p),need:need(p),grp:"",st:{},ord:[]})}
+  function St(p){var e=E(p);if(!e.st[stp]){e.st[stp]={put:{},rej:{},msg:[]};e.ord.push(stp)}return e.st[stp]}
+  function add(o,k,v){o[k]=o[k]||[];if(o[k].indexOf(v)<0)o[k].push(v)}
+  function rj(p,dd,r){if(r)add(St(p).rej,r,dd)}
+  function msg(p,t){var m=St(p).msg;if(m.indexOf(t)<0)m.push(t)}
+  function put(dd,p,lbl){plan[dd]=p.id;add(St(p).put,lbl||stp,dd)}
+  function ok(p,dd){var r=ok0(p,dd);if(!r)rj(p,dd,why(p,dd));return r}
   function need(p){return eff(p,"exakt")?Math.round(sollOf(p)/20):Math.ceil(sollOf(p)/20)}
   function count(p){var n=0;for(var k in plan)if(plan[k]===p.id)n++;return n}
   function runs(p){var r=0,inr=false;for(var k=1;k<=N;k++){if(plan[k]===p.id){if(!inr){r++;inr=true}}else inr=false}return r}
   var auto=active().filter(function(p){return !eff(p,"manuell")});
+  active().forEach(function(p){E(p).grp=eff(p,"manuell")?"nur von Hand – wird nicht automatisch eingeplant":""});
   // 1 Termine
-  active().forEach(function(p){for(d=1;d<=N;d++)if(vg(p.id,d)==="T"&&!plan[d])plan[d]=p.id});
+  stp="1 Termine";
+  active().forEach(function(p){for(d=1;d<=N;d++)if(vg(p.id,d)==="T"){if(!plan[d]){put(d,p);L.gen.push(["ok","Tag "+d+": Termin – "+p.name+" übernimmt den Dienst"])}else L.gen.push(["crit","Tag "+d+": Termin auch für "+p.name+", Dienst bleibt bei "+pname(plan[d])])}});
   // 2 feste Muster (z. B. Do-Sa in geraden KW)
-  auto.forEach(function(p){var mu=eff(p,"muster");if(!mu)return;var cands=[];
+  stp="2 Muster";
+  auto.forEach(function(p){var mu=eff(p,"muster");if(!mu)return;E(p).grp="festes Muster (Schritt 2)";var cands=[];
     for(d=1;d<=N;d++)if(dow(d)===mu.start){var ev=isoWeek(Y,M,d)%2===0;cands.push({d:d,fit:mu.kw==="alle"||ev===(mu.kw==="gerade")})}
     cands.sort(function(a,b){return (b.fit?1:0)-(a.fit?1:0)||a.d-b.d});
-    for(i=0;i<cands.length&&count(p)<need(p);i++){var s0=cands[i].d,all=true;for(var j=0;j<mu.len;j++)if(!ok(p,s0+j))all=false;if(all&&need(p)-count(p)>=mu.len)for(j=0;j<mu.len;j++)plan[s0+j]=p.id}
-    for(i=0;i<cands.length&&count(p)<need(p);i++){var s1=cands[i].d;for(var j2=0;j2<mu.len&&count(p)<need(p);j2++)if(ok(p,s1+j2))plan[s1+j2]=p.id}
-    if(!eff(p,"exakt"))return;for(d=1;d<=N&&count(p)<need(p);d++)if(ok(p,d))plan[d]=p.id});
+    for(i=0;i<cands.length&&count(p)<need(p);i++){var s0=cands[i].d,all=true;for(var j=0;j<mu.len;j++)if(!ok(p,s0+j))all=false;if(all&&need(p)-count(p)>=mu.len)for(j=0;j<mu.len;j++)put(s0+j,p,cands[i].fit?"Muster-Block":"Muster-Block außerhalb der KW-Regel");else if(!all)msg(p,"Block ab "+s0+". nicht komplett frei")}
+    for(i=0;i<cands.length&&count(p)<need(p);i++){var s1=cands[i].d;for(var j2=0;j2<mu.len&&count(p)<need(p);j2++)if(ok(p,s1+j2))put(s1+j2,p,"Teilblock (Muster unvollständig)")}
+    if(!eff(p,"exakt")){msg(p,count(p)>=need(p)?"Soll erreicht":"Soll nicht erreicht, keine weiteren Musterplätze");return}
+    for(d=1;d<=N&&count(p)<need(p);d++)if(ok(p,d))put(d,p,"Auffüllen wegen „genau“ (ohne Muster)");
+    msg(p,count(p)>=need(p)?"Soll erreicht":"Soll nicht erreicht, keine freien Tage mehr")});
   var singles=auto.filter(function(p){return eff(p,"runMax")===1&&!eff(p,"muster")});
   var others=auto.filter(function(p){return eff(p,"runMax")!==1&&!eff(p,"muster")});
   var phased=others.filter(function(p){return eff(p,"phasenMax")!==null&&!eff(p,"rest")});
   var blocky=others.filter(function(p){return eff(p,"phasenMax")===null&&!eff(p,"rest")});
   var resters=others.filter(function(p){return eff(p,"rest")});
+  singles.forEach(function(p){E(p).grp="Einzeldienste (Schritt 5)"});phased.forEach(function(p){E(p).grp="Phasen (Schritte 3, 4)"});blocky.forEach(function(p){E(p).grp="Blöcke (Schritte 3, 6)"});resters.forEach(function(p){E(p).grp="füllt Rest (Schritte 3, 7)"});
   // 3 je ein Wochenend-Block (Fr-Mo) fuer alle, die Wochenenden duerfen
-  phased.concat(resters,blocky).forEach(function(p){var weMax=eff(p,"weMax");if(weMax===0)return;var rmax=eff(p,"runMax")||4;
+  stp="3 Wochenend-Block";
+  phased.concat(resters,blocky).forEach(function(p){var weMax=eff(p,"weMax");if(weMax===0){msg(p,"übersprungen: max. 0 Wochenenden");return}var rmax=eff(p,"runMax")||4;
     var ws=eff(p,"weStart");if(ws===null)ws=5;
-    for(d=1;d<=N;d++)if(dow(d)===ws){var len=0;while(len<rmax&&ok(p,d+len))len++;if(len>=Math.min(3,rmax)){for(i=0;i<len;i++)plan[d+i]=p.id;return}}});
+    for(d=1;d<=N;d++)if(dow(d)===ws){var len=0;while(len<rmax&&ok(p,d+len))len++;if(len>=Math.min(3,rmax)){for(i=0;i<len;i++)put(d+i,p);return}}
+    msg(p,"kein passender Block gefunden (mind. "+Math.min(3,rmax)+" Tage ab "+WDA[ws]+")")});
   // 4 Phasen (z. B. Stine): Wochentagsphasen bis Soll, ohne Einzel-Rest
+  stp="4 Phasen";
   phased.forEach(function(p){var rmax=eff(p,"runMax")||4,phMax=eff(p,"phasenMax"),target=need(p),guard=0;
     while(count(p)<target&&runs(p)<phMax&&guard++<12){var best=null,nS=count(p);
       for(d=1;d<=N;d++){if(!ok(p,d)||plan[d-1]===p.id||dow(d)===5||dow(d)===6||dow(d)===0)continue;var run=0;while(ok(p,d+run)&&dow(d+run)>=1&&dow(d+run)<=4)run++;
         var len2=Math.min(rmax,run>=rmax?run-1:run,target-nS);while(len2>0&&plan[d+len2]===p.id)len2--;if(target-nS-len2===1)len2--;
         if(len2>=2&&(!best||len2>best.len))best={d:d,len:len2}}
-      if(!best)break;for(i=0;i<best.len;i++)plan[best.d+i]=p.id}});
+      if(!best)break;for(i=0;i<best.len;i++)put(best.d+i,p)}
+    msg(p,count(p)>=target?"Soll erreicht":runs(p)>=phMax?"max. Phasen erreicht ("+phMax+")":guard>12?"Abbruch nach 12 Versuchen":"kein passender Block gefunden (Mo–Do, mind. 2 Tage, kein Einzel-Rest)")});
   // 5 Einzeldienste als Trenner, Reststrecken bleiben 0 oder >= 3
+  stp="5 Einzeldienste";
   singles.forEach(function(p){var tM=need(p),nM=0;
-    function okM(k){return ok(p,k)&&plan[k-1]!==p.id&&plan[k+1]!==p.id&&(!eff(p,"wePaar")||(dow(k)>=1&&dow(k)<=4))}
+    function okM(k){if(!ok(p,k))return false;if(plan[k-1]===p.id||plan[k+1]===p.id){rj(p,k,"Nachbartag schon eigener Dienst");return false}if(eff(p,"wePaar")&&!(dow(k)>=1&&dow(k)<=4)){rj(p,k,"Fr–So nicht als Einzeldienst (Regel Sa+So)");return false}return true}
     var minRest=[99,3,2,0];
     for(var pass=0;pass<4&&nM<tM;pass++)for(d=1;d<=N&&nM<tM;d++){if(!okM(d))continue;var ls2=d,le=d;while(free(ls2-1))ls2--;while(free(le+1))le++;var left=d-ls2,right=le-d;
-      if(pass===0&&!(left===0&&right===0))continue;if(!((left===0||left>=minRest[pass])&&(right===0||right>=minRest[pass])))continue;plan[d]=p.id;nM++}});
+      if(pass===0&&!(left===0&&right===0))continue;if(!((left===0||left>=minRest[pass])&&(right===0||right>=minRest[pass])))continue;put(d,p,"Einzeldienst (Durchgang "+(pass+1)+")");nM++}
+    msg(p,nM>=tM?"Soll erreicht":"nur "+nM+" von "+tM+" Einzeldiensten, keine weiteren passenden Tage")});
   // 6 Bloecke bis Soll
+  stp="6 Blöcke";
   blocky.forEach(function(p){var rmax=eff(p,"runMax")||4,target=need(p),guard=0;
     while(count(p)<target&&guard++<12){var best=null,got=count(p);
       for(d=1;d<=N;d++){if(!ok(p,d)||plan[d-1]===p.id)continue;var run=0;while(run<rmax&&ok(p,d+run)&&run<target-got)run++;while(run>0&&plan[d+run]===p.id)run--;
         if(run>0&&(!best||run>best.len))best={d:d,len:run}}
-      if(!best)break;for(i=0;i<best.len;i++)plan[best.d+i]=p.id}});
+      if(!best)break;for(i=0;i<best.len;i++)put(best.d+i,p)}
+    msg(p,count(p)>=target?"Soll erreicht":guard>12?"Abbruch nach 12 Versuchen":"kein passender Block gefunden")});
   // 7 Rest
-  resters.forEach(function(p){for(d=1;d<=N;d++)if(ok(p,d))plan[d]=p.id});
+  stp="7 Rest";
+  resters.forEach(function(p){for(d=1;d<=N;d++)if(ok(p,d))put(d,p);msg(p,"alle übrigen erlaubten Tage übernommen")});
+  // Ergebnis und unbesetzte Tage
+  active().forEach(function(p){var e=E(p);e.got=count(p)});
+  for(var u=1;u<=N;u++)if(!plan[u])L.gen.push(["crit","Tag "+u+" unbesetzt – "+active().map(function(p){return p.name+": "+(eff(p,"manuell")?"nur von Hand":(why(p,u)||"möglich, aber nicht eingeplant"))}).join("; ")]);
   return plan}
+function renderLog(){var el=document.getElementById("vlog");if(!el)return;
+  if(!VL){el.innerHTML='<p class="caption">Für diesen Monat wurde in dieser Sitzung noch kein Vorschlag erzeugt. Klicke oben auf „Vorschlag erzeugen“. Danach steht hier, welche Regeln für wen galten, welche Tage in welchem Schritt gesetzt wurden und warum andere Tage nicht gingen.</p>';return}
+  function days(a){return a.slice().sort(function(x,y){return x-y}).join(". ")+"."}
+  function hl(x){return '<div class="hint '+x[0]+'"><i></i><span>'+esc(x[1])+'</span></div>'}
+  var ps=active().filter(function(p){return VL.per[p.id]}),h=VL.hints||[];
+  var gh=h.filter(function(x){return !ps.some(function(p){return x[1].indexOf(p.name)>=0})});
+  var out='<h4>Allgemein</h4><div class="hints">'+(VL.gen.length?VL.gen.map(hl).join(""):'<p class="caption">Keine Termine, keine unbesetzten Tage.</p>')+gh.map(hl).join("")+'</div>';
+  ps.forEach(function(p){var e=VL.per[p.id],hp=h.filter(function(x){return x[1].indexOf(p.name)>=0});
+    out+='<h4>'+esc(p.name)+' <small>'+esc(e.rules)+' · Ziel '+e.need+' Dienste'+(e.grp?' · '+esc(e.grp):'')+'</small></h4><ul>';
+    e.ord.forEach(function(s){var st=e.st[s],li=[];
+      for(var k in st.put)li.push('gesetzt'+(k===s?'':' ('+esc(k)+')')+': '+days(st.put[k]));
+      st.msg.forEach(function(m){li.push(esc(m))});
+      var rr=[];for(var r in st.rej)rr.push(esc(r)+(r==="schon belegt"?" ("+st.rej[r].length+" Tage)":": "+days(st.rej[r])));
+      if(rr.length)li.push('<span class="rj">nicht möglich – '+rr.join("; ")+'</span>');
+      out+='<li><b>Schritt '+esc(s)+'</b>: '+li.join(" · ")+'</li>'});
+    if(!e.ord.length)out+='<li>kein Schritt hat diese Person eingeplant</li>';
+    out+='</ul><div class="hints">'+hl([e.got>=e.need?"ok":"warn","Ergebnis: "+e.got+" × 20 h = "+e.got*20+" h, Ziel "+e.need+" Dienste ("+sollOf(p)+" h)"])+hp.map(hl).join("")+'</div>'});
+  el.innerHTML=out}
 
 /* ---------- Vorgaben-Tab ---------- */
 function renderVg(){
@@ -20606,7 +20657,7 @@ document.getElementById("btnUebertrag").addEventListener("click",function(){var 
   var py=M===0?Y-1:Y,pmo=(M+11)%12,n=dim(py,pmo);S.persons.forEach(function(p){var h=0;for(var d=1;d<=n;d++)if(pm.plan[d]===p.id)h+=(d===n?5:20);if(pm.prevNight===p.id)h+=15;cur.uebertrag[p.id]=h+(+(pm.uebertrag||{})[p.id]||0)-p.soll});save();renderAll();status("Übertrag aus "+MN[pmo]+" "+py+" übernommen.")});
 
 /* ---------- Buttons ---------- */
-document.getElementById("btnVorschlag").addEventListener("click",function(){push();cur.plan=vorschlag();renderPlan();save();status("Vorschlag erzeugt. Hinweise rechts zeigen, was von Hand zu klären ist.")});
+document.getElementById("btnVorschlag").addEventListener("click",function(){push();cur.plan=vorschlag();VL.hints=hints(stats());renderPlan();renderLog();save();status("Vorschlag erzeugt. Hinweise rechts zeigen, was von Hand zu klären ist.")});
 document.getElementById("btnLeer").addEventListener("click",function(){push();cur.plan={};renderPlan();save()});
 document.getElementById("btnUndo").addEventListener("click",function(){if(undo.length){cur.plan=JSON.parse(undo.pop());renderPlan();save()}});
 document.getElementById("prevM").addEventListener("click",function(){save();M===0?setMonth(Y-1,11):setMonth(Y,M-1)});
@@ -20619,7 +20670,7 @@ function download(blob,name){
     T.dialog.save({defaultPath:name,filters:[{name:ext.toUpperCase()+"-Datei",extensions:[ext]}]}).then(function(path){if(!path)return;return blob.arrayBuffer().then(function(buf){return T.fs.writeFile(path,new Uint8Array(buf))}).then(function(){status("Gespeichert: "+path)})}).catch(function(e){status("Speichern fehlgeschlagen: "+(e&&e.message||e),true)});return}
   var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1000)}
 function rowsData(){var out=[],d;for(d=1;d<=N;d++){var night=cur.plan[d]||"",prev=d===1?(cur.prevNight||""):(cur.plan[d-1]||"");out.push({d:d,tag:WD[dow(d)],frueh:prev?pname(prev):"",spaet:night?(night===prev?pname(night):"19 Uhr"):"",nacht:night?pname(night):"",notiz:noteFor(d)+(HOL[d]?(noteFor(d)?", ":"")+HOL[d]:""),we:isWe(d)})}return out}
-function footer(){var s=stats();return S.persons.filter(function(p){return p.aktiv||s[p.id].n}).map(function(p){return p.name+" "+s[p.id].h+"/"+p.soll+" Std. – "+s[p.id].n+" Dienste"})}
+function footer(){var s=stats();return S.persons.filter(function(p){return p.aktiv||s[p.id].n}).map(function(p){return p.name+" "+s[p.id].h+"/"+s[p.id].soll+" Std. – "+s[p.id].n+" Dienste"})}
 
 /* Excel */
 document.getElementById("btnXlsSave").addEventListener("click",function(){
