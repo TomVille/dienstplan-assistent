@@ -1,5 +1,8 @@
 # Änderungen
 
+## 1.1.0 (2026-10-31)
+- Monats-Soll im Stundenkonto, sicheres Speichern beim Monatswechsel, Protokoll des letzten Vorschlags
+
 ## 1.0.1 (2026-10-31)
 - Update-Signatur im Build korrigiert
 
