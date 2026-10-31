@@ -8,6 +8,8 @@ const edit = (file, fn) => writeFileSync(file, fn(readFileSync(file, "utf8")));
 edit("package.json", s => s.replace(/"version": "[^"]+"/, `"version": "${version}"`));
 edit("src-tauri/tauri.conf.json", s => s.replace(/"version": "[^"]+"/, `"version": "${version}"`));
 edit("src-tauri/Cargo.toml", s => s.replace(/^version = "[^"]+"/m, `version = "${version}"`));
+edit("src-tauri/Cargo.lock", s => s.replace(/(name = "dienstplan-assistent"\nversion = )"[^"]+"/, `$1"${version}"`));
+edit("package-lock.json", s => s.replace(/("name": "dienstplan-assistent",\s*"version": )"[^"]+"/g, `$1"${version}"`));
 edit("src/index.html", s => s.replace(/var APP_VERSION="[^"]+"/, `var APP_VERSION="${version}"`));
 const date = new Date().toISOString().slice(0, 10);
 edit("CHANGELOG.md", s => s.replace("# Änderungen\n", `# Änderungen\n\n## ${version} (${date})\n- ${note || "Kleinere Verbesserungen"}\n`));
