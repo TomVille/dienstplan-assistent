@@ -20654,7 +20654,7 @@ document.getElementById("btnAdd").addEventListener("click",function(){var n=docu
   var base=n.toLowerCase().replace(/ä/g,"ae").replace(/ö/g,"oe").replace(/ü/g,"ue").replace(/[^a-z0-9]/g,"")||"p",id=base,k=2;while(person(id))id=base+k++;
   var np=withRules({id:id,name:n,soll:so,aktiv:true},so<=40?RULES.einzel:RULES.block);S.persons.push(np);document.getElementById("newName").value="";openRules=id;save();renderAll();status(n+" hinzugefügt – Regeln unten prüfen.")});
 document.getElementById("btnUebertrag").addEventListener("click",function(){var pm=S.months[prevKey()];if(!pm){status("Kein Vormonat gespeichert.",true);return}
-  var py=M===0?Y-1:Y,pmo=(M+11)%12,n=dim(py,pmo);S.persons.forEach(function(p){var h=0;for(var d=1;d<=n;d++)if(pm.plan[d]===p.id)h+=(d===n?5:20);if(pm.prevNight===p.id)h+=15;cur.uebertrag[p.id]=h+(+(pm.uebertrag||{})[p.id]||0)-p.soll});save();renderAll();status("Übertrag aus "+MN[pmo]+" "+py+" übernommen.")});
+  var py=M===0?Y-1:Y,pmo=(M+11)%12,n=dim(py,pmo);S.persons.forEach(function(p){var h=0;for(var d=1;d<=n;d++)if(pm.plan[d]===p.id)h+=(d===n?5:20);if(pm.prevNight===p.id)h+=15;var o=((pm.ovr||{})[p.id]||{}).soll,so=o===undefined||o===null||o===""?p.soll:+o;cur.uebertrag[p.id]=h+(+(pm.uebertrag||{})[p.id]||0)-so});save();renderAll();status("Übertrag aus "+MN[pmo]+" "+py+" übernommen.")});
 
 /* ---------- Buttons ---------- */
 document.getElementById("btnVorschlag").addEventListener("click",function(){push();cur.plan=vorschlag();VL.hints=hints(stats());renderPlan();renderLog();save();status("Vorschlag erzeugt. Hinweise rechts zeigen, was von Hand zu klären ist.")});
@@ -20695,8 +20695,11 @@ document.getElementById("fileXls").addEventListener("change",function(){var f=th
     var plan={},notes={},cnt=0;for(var r3=hr+1;r3<aoa.length;r3++){var row3=aoa[r3],dc=row3[ci.datum],day=0;
       if(dc instanceof Date)day=dc.getDate();else if(typeof dc==="number")day=dc;else{var m=String(dc).match(/^\s*(\d{1,2})\./);if(m)day=+m[1]}
       if(!day||day>N)continue;var nn=String(row3[ci.nacht]||"").trim().toLowerCase();if(byName[nn]){plan[day]=byName[nn];cnt++}
-      if(ci.notiz>=0){var nt=String(row3[ci.notiz]||"").trim();if(nt)notes[day]=nt}}
-    push();cur.plan=plan;cur.notes=notes;renderPlan();save();status(cnt+" Dienste aus "+f.name+" übernommen"+(found?" ("+MN[tm]+" "+ty+")":"")+".")}catch(err){status("Datei konnte nicht gelesen werden: "+err.message,true)}};rd.readAsArrayBuffer(f)});
+      if(ci.notiz>=0){var nt=String(row3[ci.notiz]||"").trim();// Feiertag und Termin-Stichworte hängt der Export selbst an – nicht als Notiz übernehmen, sonst doppelt
+        var auto=[HOL[day]];for(var tp in cur.termin)auto.push((cur.termin[tp]||{})[day]);nt=nt.split(/,\s*/).filter(function(x){return x&&auto.indexOf(x)<0}).join(", ");
+        if(nt)notes[day]=nt}}
+    push();cur.plan=plan;for(var nd in notes)cur.notes[nd]=notes[nd]; // vorhandene Notizen bleiben, nur Tage mit Notiz in der Datei werden ersetzt
+renderPlan();save();status(cnt+" Dienste aus "+f.name+" übernommen"+(found?" ("+MN[tm]+" "+ty+")":"")+".")}catch(err){status("Datei konnte nicht gelesen werden: "+err.message,true)}};rd.readAsArrayBuffer(f)});
 
 /* Word */
 document.getElementById("btnDocx").addEventListener("click",function(){
