@@ -20255,6 +20255,7 @@ table.set input{width:90px}
     <button id="btnXlsLoad" type="button">Excel laden</button><input id="fileXls" type="file" accept=".xlsx,.xls" hidden>
     <button id="btnXlsSave" type="button">Excel speichern</button>
     <button id="btnDocx" type="button">Word speichern</button>
+    <button id="btnPdf" type="button">PDF speichern</button>
   </div>
   <div class="palette">Namen auf einen Tag ziehen oder antippen, dann Tag antippen. Doppelklick auf eine Nacht-Zelle entfernt den Dienst. <span id="pal"></span><span id="palHint" style="font-size:.85rem"></span></div>
   <div class="planer">
@@ -20715,6 +20716,33 @@ document.getElementById("btnDocx").addEventListener("click",function(){
     new D.Paragraph({spacing:{before:200}}),
   ].concat(footer().map(function(f){return new D.Paragraph({children:[new D.TextRun({text:f,font:"Arial",size:20})]})}))}]});
   D.Packer.toBlob(doc).then(function(b){download(b,"Dienstplan_"+MN[M]+"_"+Y+".docx");status("Word-Datei gespeichert.")}).catch(function(e){status("Word-Export fehlgeschlagen: "+e.message,true)})});
+
+/* PDF */
+// Eigener Mini-PDF-Writer (1 Seite A4, Standardschrift Helvetica, WinAnsi): keine Bibliothek nötig, Datei direkt teilbar.
+function pdfBytes(){
+  var WA={8211:150,8212:151,8222:132,8220:147,8221:148,8364:128,8230:133},c="",i;
+  // PDF als Byte-String (1 Zeichen = 1 Byte), damit xref-Offsets = String-Länge
+  function enc(t){var o="";for(var k=0;k<t.length;k++){var b=t.charCodeAt(k);b=b<32?32:b<128||(b>159&&b<256)?b:(WA[b]||63);o+=(b===40||b===41||b===92?"\\":"")+String.fromCharCode(b)}return o}
+  // shortcut: Breitenschätzung per Zeichenklasse statt Helvetica-Metriktabelle, bei abgeschnittenen/überlaufenden Notizen echte AFM-Breiten einbauen
+  function cw(ch){return ch==="…"?1:/[ijlt.,:;'!|fr ()\-]/.test(ch)?.3:/[A-ZÄÖÜmw]/.test(ch)?.72:.56}
+  function tw(t){for(var s=0,k=0;k<t.length;k++)s+=cw(t[k]);return s*10}
+  function fit(t,w){if(tw(t)<=w)return t;while(t&&tw(t+"…")>w)t=t.slice(0,-1);return t+"…"}
+  function n(v){return Math.round(v*100)/100}
+  function txt(f,sz,x,y,t){c+="BT /"+f+" "+sz+" Tf "+n(x)+" "+n(y)+" Td ("+enc(t)+") Tj ET\n"}
+  // shortcut: eine Seite, feste Zeilenhöhe (31 Tage + ~8 Fußzeilen passen), bei mehr Zeilen Seitenumbruch einbauen
+  var L=57,R=553,TOP=780,RH=18,X=[L],rd=rowsData(),rows=[["Datum","Tag","Früh","Spät","Nacht","Notiz"]].concat(rd.map(function(r){return [r.d+".",r.tag,r.frueh,r.spaet,r.nacht,r.notiz]})),bot=TOP-rows.length*RH;
+  [9,16,16,16,16,27].forEach(function(p,k){X.push(X[k]+p*(R-L)/100)});
+  txt("F2",14,L,800,"Dienstplan "+MN[M]+" "+Y);
+  c+="1 0.949 0.702 rg\n";rd.forEach(function(r,k){if(r.we)c+=L+" "+(TOP-(k+2)*RH)+" "+(R-L)+" "+RH+" re f\n"});
+  c+="0 g 0 G 0.5 w\n";for(i=0;i<=rows.length;i++)c+=L+" "+(TOP-i*RH)+" m "+R+" "+(TOP-i*RH)+" l\n";X.forEach(function(x){c+=n(x)+" "+TOP+" m "+n(x)+" "+bot+" l\n"});c+="S\n";
+  rows.forEach(function(r,k){r.forEach(function(v,j){txt(k?"F1":"F2",10,X[j]+4,TOP-(k+1)*RH+5.5,fit(String(v),X[j+1]-X[j]-8))})});
+  footer().forEach(function(f,k){txt("F1",10,L,bot-24-k*14,f)});
+  function font(b){return "<< /Type /Font /Subtype /Type1 /BaseFont /"+b+" /Encoding /WinAnsiEncoding >>"}
+  var objs=["<< /Type /Catalog /Pages 2 0 R >>","<< /Type /Pages /Kids [3 0 R] /Count 1 >>","<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",font("Helvetica"),font("Helvetica-Bold"),"<< /Length "+c.length+" >>\nstream\n"+c+"\nendstream"];
+  var out="%PDF-1.4\n%\xE2\xE3\xCF\xD3\n",off=[];objs.forEach(function(o,k){off.push(out.length);out+=(k+1)+" 0 obj\n"+o+"\nendobj\n"});
+  var xr=out.length;out+="xref\n0 "+(objs.length+1)+"\n0000000000 65535 f \n"+off.map(function(o){return ("000000000"+o).slice(-10)+" 00000 n \n"}).join("")+"trailer\n<< /Size "+(objs.length+1)+" /Root 1 0 R >>\nstartxref\n"+xr+"\n%%EOF";
+  var u=new Uint8Array(out.length);for(i=0;i<out.length;i++)u[i]=out.charCodeAt(i);return u}
+document.getElementById("btnPdf").addEventListener("click",function(){download(new Blob([pdfBytes()],{type:"application/pdf"}),"Dienstplan_"+MN[M]+"_"+Y+".pdf");status("PDF-Datei gespeichert.")});
 
 /* Sicherung */
 document.getElementById("btnBackup").addEventListener("click",function(){download(new Blob([JSON.stringify(S,null,1)],{type:"application/json"}),"Dienstplan-Sicherung.json")});

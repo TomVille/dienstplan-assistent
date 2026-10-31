@@ -116,3 +116,24 @@ test("Excel-Import: Notizen werden zusammengeführt, Auto-Texte nicht doppelt ü
   assert.deepEqual(plain(t.cur.plan), { 3: "laura", 20: "laura", 25: "marie" });
   assert.deepEqual(plain(t.cur.notes), { 3: "neu", 5: "bleibt", 20: "Zahnarzt" });
 });
+
+test("PDF-Export: gültige Struktur, xref-Offsets stimmen, Umlaute als WinAnsi", async () => {
+  const { t } = await loadApp();
+  const c = fresh(t, 2026, 11);
+  for (let d = 1; d <= 31; d++) c.plan[d] = d % 2 ? "laura" : "marie";
+  c.notes = { 3: "Arzttermin (Zähne) bei Dr. Müller – bitte früher kommen, sonst Ärger mit der Übergabe" };
+  const u = t.pdfBytes();
+  const s = Buffer.from(u).toString("latin1");
+  assert.ok(s.startsWith("%PDF-"));
+  assert.ok(s.endsWith("%%EOF"));
+  const xr = +s.match(/startxref\n(\d+)/)[1];
+  assert.ok(s.startsWith("xref", xr));
+  const offs = [...s.slice(xr).matchAll(/(\d{10}) 00000 n /g)].map((m) => +m[1]);
+  assert.equal(offs.length, 6);
+  offs.forEach((o, i) => assert.ok(s.startsWith(`${i + 1} 0 obj`, o), `Objekt ${i + 1} an Offset ${o}`));
+  assert.ok(u.includes(0xe4), "ä als 0xE4");
+  assert.ok(s.includes("\\(Z"), "Klammern escaped");
+  assert.ok(u.includes(0x85), "lange Notiz mit … gekürzt");
+  const len = +s.match(/\/Length (\d+)/)[1], st = s.indexOf("stream\n") + 7;
+  assert.equal(s.slice(st + len, st + len + 10), "\nendstream");
+});
