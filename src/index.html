@@ -20323,7 +20323,7 @@ function withRules(p,r){for(var k in r)p[k]=JSON.parse(JSON.stringify(r[k]));p.o
 var DEF={persons:[withRules({id:"laura",name:"Laura",soll:120,aktiv:true},RULES.laura),withRules({id:"marie",name:"Marie",soll:144,aktiv:true},RULES.marie),withRules({id:"steffi",name:"Steffi",soll:168,aktiv:true},RULES.steffi),withRules({id:"stine",name:"Stine",soll:168,aktiv:true},RULES.stine)],months:{}};
 
 var S, Y, M, cur, undo=[], selected=null;
-var APP_VERSION="1.1.1";
+var APP_VERSION="1.2.0";
 var T=window.__TAURI__||null, DB=null;
 /* ---------- Speicher: Browser (localStorage) oder App (SQLite) ---------- */
 function normalize(o){o.persons.forEach(function(p){if(p.aktiv===undefined)p.aktiv=true;if(!p.off){var r=RULES[p.rolle]||RULES[p.id]||RULES.block;withRules(p,r);delete p.rolle}

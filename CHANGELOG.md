@@ -1,5 +1,8 @@
 # Änderungen
 
+## 1.2.0 (2026-10-31)
+- Vorschlag hält alle Regeln streng ein (Blocklängen, Wochenenden, Muster, Stundenziel mit Übertrag); Marie mit einem Wochenende Sa+So
+
 ## 1.1.1 (2026-10-31)
 - Direkter PDF-Export; Übertrag mit Monats-Soll; Excel-Import ohne Notizverlust; engere Dateirechte
 
