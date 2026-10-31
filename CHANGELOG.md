@@ -1,5 +1,8 @@
 # Änderungen
 
+## 1.1.1 (2026-10-31)
+- Direkter PDF-Export; Übertrag mit Monats-Soll; Excel-Import ohne Notizverlust; engere Dateirechte
+
 ## 1.1.0 (2026-10-31)
 - Monats-Soll im Stundenkonto, sicheres Speichern beim Monatswechsel, Protokoll des letzten Vorschlags
 
