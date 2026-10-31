@@ -3,7 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const HTML = fs.readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
-const EXPOSE = 'window.__t={vorschlag:vorschlag,setMonth:setMonth,stats:stats,hints:hints,sollOf:sollOf,konto:konto,footer:footer,blocked:blocked,pdfBytes:pdfBytes,person:person,prevKey:prevKey,' +
+const EXPOSE = 'window.__t={vorschlag:vorschlag,setMonth:setMonth,stats:stats,hints:hints,sollOf:sollOf,rulesOf:rulesOf,konto:konto,footer:footer,blocked:blocked,pdfBytes:pdfBytes,person:person,prevKey:prevKey,' +
   'get S(){return S},get cur(){return cur},get N(){return N},get HOL(){return HOL}};})();';
 
 function el() {
@@ -13,12 +13,12 @@ function el() {
   return e;
 }
 
-export async function loadApp({ XLSX } = {}) {
+export async function loadApp({ XLSX, store: seed } = {}) {
   const start = HTML.lastIndexOf("<script>");
   let js = HTML.slice(start + 8, HTML.lastIndexOf("</script>"));
   const patched = js.replace(/\}\)\(\);\s*$/, EXPOSE);
   if (patched === js) throw new Error("load-app: Ende des App-Scripts `})();` nicht gefunden – Injection fehlgeschlagen");
-  const els = {}, store = {};
+  const els = {}, store = { ...(seed || {}) }; // seed: vorbelegter localStorage
   const doc = { getElementById: (id) => els[id] || (els[id] = el()), querySelector: () => el(), querySelectorAll: () => [],
     addEventListener() {}, createElement: () => el(), body: el() };
   const win = { localStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; } } };

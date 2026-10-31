@@ -20315,7 +20315,7 @@ var WD=["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag
 var WDA=["So","Mo","Di","Mi","Do","Fr","Sa"];
 var MN=["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 var RULES={laura:{exakt:true,runMin:3,runMax:3,tage:[4,5,6],muster:{start:4,len:3,kw:"gerade"}},
-  marie:{runMax:1,weMax:1,wePaar:true,weStart:6,tage:[1,2,3,4]},
+  marie:{runMax:1,weMax:1,wePaar:true,weStart:6,tage:[1,2,3,4,6,0]},
   steffi:{runMin:3,runMax:4,rest:true},
   stine:{runMax:4,phasenMax:3,weMax:1},
   einzel:{runMax:1},block:{runMin:3,runMax:4},rest:{rest:true},manuell:{manuell:true}};
@@ -20326,9 +20326,11 @@ var S, Y, M, cur, undo=[], selected=null;
 var APP_VERSION="1.1.1";
 var T=window.__TAURI__||null, DB=null;
 /* ---------- Speicher: Browser (localStorage) oder App (SQLite) ---------- */
-function normalize(o){o.persons.forEach(function(p){if(p.aktiv===undefined)p.aktiv=true;if(!p.off){var r=RULES[p.rolle]||RULES[p.id]||RULES.block;withRules(p,r);delete p.rolle}});return o}
+function normalize(o){o.persons.forEach(function(p){if(p.aktiv===undefined)p.aktiv=true;if(!p.off){var r=RULES[p.rolle]||RULES[p.id]||RULES.block;withRules(p,r);delete p.rolle}
+    // einmalig: alte Marie-Regel Mo–Do bekommt Sa+So dazu; fix1 merkt sich das, damit bewusst entfernte Sa/So weg bleiben
+    if(p.id==="marie"&&!p.fix1){if(p.wePaar&&p.tage&&p.tage.join()==="1,2,3,4")p.tage=p.tage.concat([6,0]);p.fix1=1}});return o}
 function loadLocal(){var o=null;try{var j=localStorage.getItem(KEY);if(j){var x=JSON.parse(j);if(x&&x.persons&&x.months)o=x}}catch(e){}return o}
-var RULE_FIELDS=["exakt","runMin","runMax","phasenMax","weMax","wePaar","weDienstMax","weStart","tage","muster","rest","manuell","off"];
+var RULE_FIELDS=["exakt","runMin","runMax","phasenMax","weMax","wePaar","weDienstMax","weStart","tage","muster","rest","manuell","off","fix1"];
 function rulesOf(p){var r={};RULE_FIELDS.forEach(function(k){if(p[k]!==undefined)r[k]=p[k]});return r}
 async function dbLoad(){
   var o={persons:[],months:{}};
@@ -20431,8 +20433,9 @@ function hints(s){
   for(var dx=1;dx<=N;dx++){var px=cur.plan[dx];if(px&&!isActive(px))h.push(["warn",pname(px)+" am "+dx+". eingeteilt, ist aber pausiert oder nicht im Team"])}
   active().forEach(function(p){var sx=s[p.id],nm=p.name,soll=sollOf(p),runMax=eff(p,"runMax"),runMin=eff(p,"runMin"),phMax=eff(p,"phasenMax"),weMax=eff(p,"weMax"),mu=eff(p,"muster"),dd;
     if(eff(p,"exakt")){if(sx.h!==soll)h.push(["warn",nm+" "+sx.h+" h statt genau "+soll+" h"])}
-    else if(!empty&&soll>0&&sx.ist<soll)h.push(["warn",nm+" "+sx.ist+" h, Ziel "+(eff(p,"rest")?"mind. ":"")+soll+" h"]);
-    if(runMax!==null&&sx.runs.some(function(r){return r>runMax}))h.push(["warn",runMax===1?nm+" hat mehr als einen Dienst am Stück (Regel: Einzeldienste)":nm+" mehr als "+runMax+" Dienste am Stück"]);
+    else if(!empty&&soll>0&&sx.ist<soll-10)h.push(["warn",nm+" "+sx.ist+" h, Ziel "+(eff(p,"rest")?"mind. ":"")+soll+" h"]);
+    var tooLong=false;if(runMax!==null)for(dd=1;dd<=N;dd++)if(cur.plan[dd]===p.id&&cur.plan[dd-1]!==p.id){var e1=dd;while(cur.plan[e1+1]===p.id)e1++;if(e1-dd+1>runMax&&!(eff(p,"wePaar")&&e1===dd+1&&dow(dd)===6))tooLong=true}
+    if(tooLong)h.push(["warn",runMax===1?nm+" hat mehr als einen Dienst am Stück (Regel: Einzeldienste)":nm+" mehr als "+runMax+" Dienste am Stück"]);
     if(runMin!==null&&runMin>1){var sr=sx.runs.filter(function(r){return r<runMin}).length;if(sr)h.push(["warn",nm+" "+sr+" Block"+(sr>1?"s":"")+" kürzer als "+runMin+" Dienste"])}
     if(phMax!==null&&sx.runs.length>phMax)h.push(["warn",nm+" "+sx.runs.length+" Dienstphasen (max. "+phMax+")"]);
     if(weMax!==null&&sx.weN>weMax)h.push(["warn",nm+" "+sx.weN+" Wochenenden (max. "+weMax+")"]);
@@ -20502,74 +20505,101 @@ function vorschlag(){
   function ok0(p,dd){if(!(free(dd)&&!blocked(p.id,dd)&&dayOk(p,dd)))return false;var w=dow(dd),m=eff(p,"weDienstMax");if(m!==null&&(w===5||w===6||w===0)&&weS(p)>=m)return false;return true}
   // Protokoll: Grund, warum ok0 nein sagt (gleiche Reihenfolge wie ok0)
   function why(p,dd){if(dd<1||dd>N)return null;if(plan[dd])return plan[dd]===p.id?null:"schon belegt";var a=vg(p.id,dd);if(a==="U"||a==="F")return "Urlaub/Wunschfrei";if(blocked(p.id,dd))return "Urlaub/Wunschfrei am Folgetag";if(!dayOk(p,dd))return "Wochentag nicht erlaubt";if(!ok0(p,dd))return "WE-Dienste max. erreicht";return null}
-  function E(p){return L.per[p.id]||(L.per[p.id]={rules:ruleSummary(p),need:need(p),grp:"",st:{},ord:[]})}
+  function E(p){return L.per[p.id]||(L.per[p.id]={rules:ruleSummary(p),ziel:target(p),zw:zielText(p),grp:"",st:{},ord:[]})}
   function St(p){var e=E(p);if(!e.st[stp]){e.st[stp]={put:{},rej:{},msg:[]};e.ord.push(stp)}return e.st[stp]}
   function add(o,k,v){o[k]=o[k]||[];if(o[k].indexOf(v)<0)o[k].push(v)}
   function rj(p,dd,r){if(r)add(St(p).rej,r,dd)}
   function msg(p,t){var m=St(p).msg;if(m.indexOf(t)<0)m.push(t)}
   function put(dd,p,lbl){plan[dd]=p.id;add(St(p).put,lbl||stp,dd)}
   function ok(p,dd){var r=ok0(p,dd);if(!r)rj(p,dd,why(p,dd));return r}
-  function need(p){return eff(p,"exakt")?Math.round(sollOf(p)/20):Math.ceil(sollOf(p)/20)}
   function count(p){var n=0;for(var k in plan)if(plan[k]===p.id)n++;return n}
-  function runs(p){var r=0,inr=false;for(var k=1;k<=N;k++){if(plan[k]===p.id){if(!inr){r++;inr=true}}else inr=false}return r}
+  // Stunden wie stats(): 20 h je Dienst, am Monatsletzten 5 h. Ziel = Soll − Übertrag − 15 h aus der Vornacht
+  function hrs(dd){return dd===N?5:20}
+  function H(p){var h=0;for(var k=1;k<=N;k++)if(plan[k]===p.id)h+=hrs(k);return h}
+  function ueb(p){return +(cur.uebertrag[p.id]||0)}
+  function target(p){return sollOf(p)-ueb(p)-(cur.prevNight===p.id?15:0)}
+  function zielText(p){var u=ueb(p),t=[];if(u)t.push((u>0?"− ":"+ ")+Math.abs(u)+" h Übertrag");if(cur.prevNight===p.id)t.push("− 15 h Vornacht");return t.length?"Soll "+sollOf(p)+" h "+t.join(" "):""}
+  function own(p,dd){return dd>=1&&dd<=N&&plan[dd]===p.id}
+  // Dienste s..s+n-1 nur, wenn auch der kleinste davon das Ergebnis näher ans Ziel bringt (= gerundet); „füllt Rest“ darf drüber.
+  // Muster-Blöcke und Blöcke in Mindestlänge gibt es nur ganz: dann zählt, ob der ganze Block näher ans Ziel bringt
+  function closer(p,s,n){if(eff(p,"rest"))return true;var a=0,lo=99,whole=!!eff(p,"muster")||n<=(eff(p,"runMin")||1);for(var k=s;k<s+n;k++)if(!own(p,k)){a+=hrs(k);lo=Math.min(lo,hrs(k))}return a===0||H(p)+a-(whole?a:lo)/2<target(p)}
+  function weK(dd){var w=dow(dd);return w===5?dd+1:w===6?dd:w===0?dd-1:null} // Wochenende = sein Samstag, wie stats()
+  function kwOk(mu,dd){return mu.kw==="alle"||(isoWeek(Y,M,dd)%2===0)===(mu.kw==="gerade")}
+  // Prüft neuen Block s..s+n-1 (Tage einzeln vorher mit ok0) gegen alle übrigen Regeln, mit Nachbardiensten. "" = passt, sonst Grund
+  function fits(p,s,n){var e=s+n-1,a=s,b=e,k,x;function has(q){return q>=1&&q<=N&&(plan[q]===p.id||(q>=s&&q<=e))}
+    while(has(a-1))a--;while(has(b+1))b++;var len=b-a+1,rmax=eff(p,"runMax"),rmin=eff(p,"runMin"),mu=eff(p,"muster"),wp=eff(p,"wePaar");
+    if(rmax!==null&&len>rmax&&!(wp&&len===2&&dow(a)===6))return "zu lang mit Nachbardiensten (max. "+rmax+" am Stück)";
+    if(rmin!==null&&len<rmin)return "zu kurz (mind. "+rmin+" am Stück)";
+    if(mu&&!(dow(a)===mu.start&&kwOk(mu,a)))return "passt nicht ins feste Muster";
+    var wk={},wn=0,wsN=0,ph=0;for(k=1;k<=N;k++)if(has(k)){if(!has(k-1))ph++;x=weK(k);if(x!==null){wsN++;if(!wk[x]){wk[x]=1;wn++}}}
+    var wm=eff(p,"weMax"),wdm=eff(p,"weDienstMax"),phm=eff(p,"phasenMax"),ws=eff(p,"weStart");
+    if(wm!==null&&wn>wm)return "max. "+wm+" Wochenende"+(wm===1?"":"n")+" erreicht";
+    if(wdm!==null&&wsN>wdm)return "max. "+wdm+" WE-Dienste erreicht";
+    if(phm!==null&&ph>phm)return "max. "+phm+" Dienstphasen erreicht";
+    for(k=s;k<=e;k++){x=weK(k);if(x===null)continue;
+      if(wp&&!(has(x)&&has(x+1)))return "Wochenende nur als Sa+So am Stück";
+      if(ws!==null&&x>=2){var f=x-1;while(!has(f))f++;if(dow(f)!==ws&&!has(f-1))return "Wochenend-Dienst muss am "+WDA[ws]+" beginnen"}}
+    return ""}
+  function allOk(p,s,n){for(var k=s;k<s+n;k++)if(!ok0(p,k))return false;return true}
+  function hiOf(p,dd){return Math.max(eff(p,"runMax")||7,eff(p,"wePaar")&&dow(dd)===6?2:1)}
+  // Block für Tag u: {s,n} oder Grund, warum keiner geht
+  function gap(p,u){if(eff(p,"manuell"))return "nur von Hand";var w=why(p,u);if(w)return w;var r="";
+    for(var n=hiOf(p,u);n>=1;n--)for(var s=u-n+1;s<=u;s++){if(!allOk(p,s,n))continue;r=fits(p,s,n)||(closer(p,s,n)?"":"Stundenziel schon erreicht");if(!r)return {s:s,n:n}}
+    return r||"kein freier Block"}
   var auto=active().filter(function(p){return !eff(p,"manuell")});
-  active().forEach(function(p){E(p).grp=eff(p,"manuell")?"nur von Hand – wird nicht automatisch eingeplant":""});
+  active().forEach(function(p){E(p).grp=eff(p,"manuell")?"nur von Hand – wird nicht automatisch eingeplant":eff(p,"muster")?"festes Muster (Schritt 2)":eff(p,"rest")?"füllt Rest (Schritt 3)":"Schritt 3"});
   // 1 Termine
   stp="1 Termine";
   active().forEach(function(p){for(d=1;d<=N;d++)if(vg(p.id,d)==="T"){if(!plan[d]){put(d,p);L.gen.push(["ok","Tag "+d+": Termin – "+p.name+" übernimmt den Dienst"])}else L.gen.push(["crit","Tag "+d+": Termin auch für "+p.name+", Dienst bleibt bei "+pname(plan[d])])}});
-  // 2 feste Muster (z. B. Do-Sa in geraden KW)
+  // 2 feste Muster: nur ganze Blöcke in passenden Wochen, solange es näher ans Stundenziel führt
   stp="2 Muster";
-  auto.forEach(function(p){var mu=eff(p,"muster");if(!mu)return;E(p).grp="festes Muster (Schritt 2)";var cands=[];
-    for(d=1;d<=N;d++)if(dow(d)===mu.start){var ev=isoWeek(Y,M,d)%2===0;cands.push({d:d,fit:mu.kw==="alle"||ev===(mu.kw==="gerade")})}
-    cands.sort(function(a,b){return (b.fit?1:0)-(a.fit?1:0)||a.d-b.d});
-    for(i=0;i<cands.length&&count(p)<need(p);i++){var s0=cands[i].d,all=true;for(var j=0;j<mu.len;j++)if(!ok(p,s0+j))all=false;if(all&&need(p)-count(p)>=mu.len)for(j=0;j<mu.len;j++)put(s0+j,p,cands[i].fit?"Muster-Block":"Muster-Block außerhalb der KW-Regel");else if(!all)msg(p,"Block ab "+s0+". nicht komplett frei")}
-    for(i=0;i<cands.length&&count(p)<need(p);i++){var s1=cands[i].d;for(var j2=0;j2<mu.len&&count(p)<need(p);j2++)if(ok(p,s1+j2))put(s1+j2,p,"Teilblock (Muster unvollständig)")}
-    if(!eff(p,"exakt")){msg(p,count(p)>=need(p)?"Soll erreicht":"Soll nicht erreicht, keine weiteren Musterplätze");return}
-    for(d=1;d<=N&&count(p)<need(p);d++)if(ok(p,d))put(d,p,"Auffüllen wegen „genau“ (ohne Muster)");
-    msg(p,count(p)>=need(p)?"Soll erreicht":"Soll nicht erreicht, keine freien Tage mehr")});
-  var singles=auto.filter(function(p){return eff(p,"runMax")===1&&!eff(p,"muster")});
-  var others=auto.filter(function(p){return eff(p,"runMax")!==1&&!eff(p,"muster")});
-  var phased=others.filter(function(p){return eff(p,"phasenMax")!==null&&!eff(p,"rest")});
-  var blocky=others.filter(function(p){return eff(p,"phasenMax")===null&&!eff(p,"rest")});
-  var resters=others.filter(function(p){return eff(p,"rest")});
-  singles.forEach(function(p){E(p).grp="Einzeldienste (Schritt 5)"});phased.forEach(function(p){E(p).grp="Phasen (Schritte 3, 4)"});blocky.forEach(function(p){E(p).grp="Blöcke (Schritte 3, 6)"});resters.forEach(function(p){E(p).grp="füllt Rest (Schritte 3, 7)"});
-  // 3 je ein Wochenend-Block (Fr-Mo) fuer alle, die Wochenenden duerfen
-  stp="3 Wochenend-Block";
-  phased.concat(resters,blocky).forEach(function(p){var weMax=eff(p,"weMax");if(weMax===0){msg(p,"übersprungen: max. 0 Wochenenden");return}var rmax=eff(p,"runMax")||4;
-    var ws=eff(p,"weStart");if(ws===null)ws=5;
-    for(d=1;d<=N;d++)if(dow(d)===ws){var len=0;while(len<rmax&&ok(p,d+len))len++;if(len>=Math.min(3,rmax)){for(i=0;i<len;i++)put(d+i,p);return}}
-    msg(p,"kein passender Block gefunden (mind. "+Math.min(3,rmax)+" Tage ab "+WDA[ws]+")")});
-  // 4 Phasen (z. B. Stine): Wochentagsphasen bis Soll, ohne Einzel-Rest
-  stp="4 Phasen";
-  phased.forEach(function(p){var rmax=eff(p,"runMax")||4,phMax=eff(p,"phasenMax"),target=need(p),guard=0;
-    while(count(p)<target&&runs(p)<phMax&&guard++<12){var best=null,nS=count(p);
-      for(d=1;d<=N;d++){if(!ok(p,d)||plan[d-1]===p.id||dow(d)===5||dow(d)===6||dow(d)===0)continue;var run=0;while(ok(p,d+run)&&dow(d+run)>=1&&dow(d+run)<=4)run++;
-        var len2=Math.min(rmax,run>=rmax?run-1:run,target-nS);while(len2>0&&plan[d+len2]===p.id)len2--;if(target-nS-len2===1)len2--;
-        if(len2>=2&&(!best||len2>best.len))best={d:d,len:len2}}
-      if(!best)break;for(i=0;i<best.len;i++)put(best.d+i,p)}
-    msg(p,count(p)>=target?"Soll erreicht":runs(p)>=phMax?"max. Phasen erreicht ("+phMax+")":guard>12?"Abbruch nach 12 Versuchen":"kein passender Block gefunden (Mo–Do, mind. 2 Tage, kein Einzel-Rest)")});
-  // 5 Einzeldienste als Trenner, Reststrecken bleiben 0 oder >= 3
-  stp="5 Einzeldienste";
-  singles.forEach(function(p){var tM=need(p),nM=0;
-    function okM(k){if(!ok(p,k))return false;if(plan[k-1]===p.id||plan[k+1]===p.id){rj(p,k,"Nachbartag schon eigener Dienst");return false}if(eff(p,"wePaar")&&!(dow(k)>=1&&dow(k)<=4)){rj(p,k,"Fr–So nicht als Einzeldienst (Regel Sa+So)");return false}return true}
-    var minRest=[99,3,2,0];
-    for(var pass=0;pass<4&&nM<tM;pass++)for(d=1;d<=N&&nM<tM;d++){if(!okM(d))continue;var ls2=d,le=d;while(free(ls2-1))ls2--;while(free(le+1))le++;var left=d-ls2,right=le-d;
-      if(pass===0&&!(left===0&&right===0))continue;if(!((left===0||left>=minRest[pass])&&(right===0||right>=minRest[pass])))continue;put(d,p,"Einzeldienst (Durchgang "+(pass+1)+")");nM++}
-    msg(p,nM>=tM?"Soll erreicht":"nur "+nM+" von "+tM+" Einzeldiensten, keine weiteren passenden Tage")});
-  // 6 Bloecke bis Soll
-  stp="6 Blöcke";
-  blocky.forEach(function(p){var rmax=eff(p,"runMax")||4,target=need(p),guard=0;
-    while(count(p)<target&&guard++<12){var best=null,got=count(p);
-      for(d=1;d<=N;d++){if(!ok(p,d)||plan[d-1]===p.id)continue;var run=0;while(run<rmax&&ok(p,d+run)&&run<target-got)run++;while(run>0&&plan[d+run]===p.id)run--;
-        if(run>0&&(!best||run>best.len))best={d:d,len:run}}
-      if(!best)break;for(i=0;i<best.len;i++)put(best.d+i,p)}
-    msg(p,count(p)>=target?"Soll erreicht":guard>12?"Abbruch nach 12 Versuchen":"kein passender Block gefunden")});
-  // 7 Rest
-  stp="7 Rest";
-  resters.forEach(function(p){for(d=1;d<=N;d++)if(ok(p,d))put(d,p);msg(p,"alle übrigen erlaubten Tage übernommen")});
+  auto.forEach(function(p){var mu=eff(p,"muster");if(!mu)return;
+    for(d=1;d<=N;d++)if(dow(d)===mu.start&&kwOk(mu,d)){if(H(p)>=target(p)){rj(p,d,"Stundenziel schon erreicht");continue}var n=0;while(n<mu.len&&d+n<=N&&(own(p,d+n)||ok(p,d+n)))n++;
+      if(n<mu.len){rj(p,d,d+n>N?"Block reicht über das Monatsende":"Block nicht komplett frei");continue}
+      var r=fits(p,d,mu.len)||(closer(p,d,mu.len)?"":"würde das Stundenziel überschreiten");if(r){rj(p,d,r);continue}
+      for(i=d;i<d+mu.len;i++)if(!own(p,i))put(i,p,"Muster-Block")}
+    msg(p,"nur ganze Muster-Blöcke ("+WDA[mu.start]+"+"+mu.len+", "+mu.kw+" KW): "+H(p)+" h von "+target(p)+" h")});
+  // 3 Verteilung: Strahlsuche Tag für Tag. Jeder Block hält alle Regeln (fits, closer).
+  // Bewertung in Stunden: Abweichung vom Ziel (bei „füllt Rest“ nur zu wenig) + 30 je leerem Tag (lieber ein leerer Tag
+  // als jemandem 2 Dienste nehmen) + 20 ohne Sa+So bei „nur als Sa+So“ + 10 je WE über 2 ohne WE-Regel + 100 je zu kurzem Block
+  stp="3 Verteilung";
+  var EW=30,K=300,cut=false;
+  // Stunden, die p ab Tag dd höchstens noch bekommen kann (Einzeldienste nur jeden 2. Tag)
+  function cap(p,dd){var c=0,one=eff(p,"runMax")===1;for(var k=dd;k<=N;k++)if(ok0(p,k)){c+=hrs(k);if(one&&!(eff(p,"wePaar")&&dow(k)===6))k++}return c}
+  // Bewertung; vor Monatsende (dd<=N) als Schätzung für den Vergleich gleich weit geplanter Varianten
+  function val(dd,emp){var s=emp*EW,fin=dd>N,sg=emp+"|"+(plan[dd-1]||"")+(plan[dd-2]||"")+(plan[dd-3]||"");
+    auto.forEach(function(p){var t=target(p),h=0,we={},wn=0,ws=0,ph=0,sh=0,pair=false,rmin=eff(p,"runMin");
+      for(var k=1;k<=N;k++)if(plan[k]===p.id){h+=hrs(k);var x=weK(k);if(x!==null){ws++;if(!we[x]){we[x]=1;wn++}}if(dow(k)===6&&plan[k+1]===p.id)pair=true;
+        if(plan[k-1]!==p.id){ph++;var e2=k;while(plan[e2+1]===p.id)e2++;if(rmin!==null&&e2-k+1<rmin&&(fin||e2+1!==dd))sh++}}
+      var u=fin?Math.max(0,t-h):Math.max(0,t-h-cap(p,dd));
+      s+=(eff(p,"rest")?u:h>t?h-t:u+(fin?0:Math.abs(h-t*(dd-1)/N)/4))+100*sh+(eff(p,"weMax")===null&&wn>2?10*(wn-2):0)+(fin&&!pair&&eff(p,"wePaar")&&eff(p,"runMax")===1&&eff(p,"weMax")!==0?20:0);
+      sg+="|"+h+","+wn+","+ws+","+ph+","+sh+","+(pair?1:0)});
+    var q=plan[dd-1],n=0;while(q&&plan[dd-1-n]===q)n++;return {s:s,g:sg+"|"+n}}
+  function opts(dd){var o=[];auto.forEach(function(p){var n=0,hi=hiOf(p,dd);if(plan[dd-1]===p.id&&!fixed[dd-1])return;while(n<hi&&ok0(p,dd+n))n++;
+    for(var m=n;m>=1;m--)if(!fits(p,dd,m)&&closer(p,dd,m))o.push({p:p,n:m})});return o}
+  function nxt(dd){while(dd<=N&&plan[dd])dd++;return dd}
+  var fixed=plan,B={},G={},best=null,bestS=Infinity,tried=0;
+  B[nxt(1)]=[{pl:plan,emp:0}];
+  for(d=1;d<=N+1;d++){var bk=B[d];if(!bk)continue;
+    if(d>N){bk.forEach(function(st){plan=st.pl;var v=val(d,st.emp).s;if(v<bestS){bestS=v;best=st.pl}});break}
+    bk.sort(function(x,y){return x.v-y.v});if(bk.length>K){bk.length=K;cut=true}
+    bk.forEach(function(st){plan=st.pl;opts(d).concat([null]).forEach(function(o){var c={},k;for(k in st.pl)c[k]=st.pl[k];if(o)for(k=d;k<d+o.n;k++)c[k]=o.p.id;
+      plan=c;var nd=nxt(o?d+o.n:d+1),em=st.emp+(o?0:1),v=val(nd,em);plan=st.pl;
+      G[nd]=G[nd]||{};if(G[nd][v.g])return;G[nd][v.g]=1;tried++;(B[nd]=B[nd]||[]).push({pl:c,emp:em,v:v.s})})})}
+  plan=fixed;
+  L.gen.push(["ok","Schritt 3: "+tried+" Varianten verglichen, gewählt ist die mit den wenigsten leeren Tagen und Stunden am nächsten am Ziel"+(cut?" (nur die je Tag "+K+" aussichtsreichsten weiterverfolgt)":"")]);
+  if(best)auto.forEach(function(p){for(var k=1;k<=N;k++)if(best[k]===p.id&&!plan[k]){var e2=k;while(best[e2+1]===p.id&&!plan[e2+1])e2++;
+    for(var q=k;q<=e2;q++)put(q,p,eff(p,"wePaar")&&e2===k+1&&dow(k)===6?"Sa+So am Stück":e2===k?"Einzeldienst":"Block");k=e2}});
+  auto.forEach(function(p){if(eff(p,"muster"))return;var h=H(p),t=target(p);
+    msg(p,eff(p,"rest")?"füllt den Rest: "+h+" h (Ziel mind. "+t+" h)":Math.abs(h-t)<=10?"Stundenziel erreicht ("+h+" h von "+t+" h, auf ganze Dienste gerundet)":h<t?"Stundenziel nicht erreicht ("+h+" h von "+t+" h) – mit allen Regeln war das die beste Verteilung fürs ganze Team":"über dem Ziel ("+h+" h von "+t+" h)");
+    if(eff(p,"wePaar")&&eff(p,"runMax")===1){var pr=false;for(var k=1;k<N;k++)if(dow(k)===6&&plan[k]===p.id&&plan[k+1]===p.id)pr=true;
+      if(!pr)for(k=1;k<N;k++)if(dow(k)===6)rj(p,k,"Sa+So: "+(why(p,k)||why(p,k+1)||fits(p,k,2)||(closer(p,k,2)?"andere Verteilung ließ weniger Tage leer":"Stundenziel schon erreicht")))}});
+  // 4 Lücken: leere Tage mit jeder Person füllen, für die alle Regeln weiter gelten; sonst Grund je Person
+  stp="4 Lücken";
+  for(var u=1;u<=N;u++)if(free(u))auto.some(function(p){var g=gap(p,u);if(typeof g==="string")return false;for(var q=g.s;q<g.s+g.n;q++)put(q,p,"Lücke gefüllt");L.gen.push(["ok","Tag "+u+": Lücke mit "+p.name+" gefüllt"]);return true});
   // Ergebnis und unbesetzte Tage
-  active().forEach(function(p){var e=E(p);e.got=count(p)});
-  for(var u=1;u<=N;u++)if(!plan[u])L.gen.push(["crit","Tag "+u+" unbesetzt – "+active().map(function(p){return p.name+": "+(eff(p,"manuell")?"nur von Hand":(why(p,u)||"möglich, aber nicht eingeplant"))}).join("; ")]);
+  active().forEach(function(p){var e=E(p);e.got=count(p);e.h=H(p)});
+  for(u=1;u<=N;u++)if(!plan[u])L.gen.push(["crit","Tag "+u+" unbesetzt – "+active().map(function(p){var g=gap(p,u);if(typeof g!=="string")g="möglich, aber nicht eingeplant";if(!eff(p,"manuell"))rj(p,u,g);return p.name+": "+g}).join("; ")]);
   return plan}
 function renderLog(){var el=document.getElementById("vlog");if(!el)return;
   if(!VL){el.innerHTML='<p class="caption">Für diesen Monat wurde in dieser Sitzung noch kein Vorschlag erzeugt. Klicke oben auf „Vorschlag erzeugen“. Danach steht hier, welche Regeln für wen galten, welche Tage in welchem Schritt gesetzt wurden und warum andere Tage nicht gingen.</p>';return}
@@ -20579,7 +20609,7 @@ function renderLog(){var el=document.getElementById("vlog");if(!el)return;
   var gh=h.filter(function(x){return !ps.some(function(p){return x[1].indexOf(p.name)>=0})});
   var out='<h4>Allgemein</h4><div class="hints">'+(VL.gen.length?VL.gen.map(hl).join(""):'<p class="caption">Keine Termine, keine unbesetzten Tage.</p>')+gh.map(hl).join("")+'</div>';
   ps.forEach(function(p){var e=VL.per[p.id],hp=h.filter(function(x){return x[1].indexOf(p.name)>=0});
-    out+='<h4>'+esc(p.name)+' <small>'+esc(e.rules)+' · Ziel '+e.need+' Dienste'+(e.grp?' · '+esc(e.grp):'')+'</small></h4><ul>';
+    out+='<h4>'+esc(p.name)+' <small>'+esc(e.rules)+' · Ziel '+e.ziel+' h'+(e.grp?' · '+esc(e.grp):'')+'</small></h4><ul>';
     e.ord.forEach(function(s){var st=e.st[s],li=[];
       for(var k in st.put)li.push('gesetzt'+(k===s?'':' ('+esc(k)+')')+': '+days(st.put[k]));
       st.msg.forEach(function(m){li.push(esc(m))});
@@ -20587,7 +20617,7 @@ function renderLog(){var el=document.getElementById("vlog");if(!el)return;
       if(rr.length)li.push('<span class="rj">nicht möglich – '+rr.join("; ")+'</span>');
       out+='<li><b>Schritt '+esc(s)+'</b>: '+li.join(" · ")+'</li>'});
     if(!e.ord.length)out+='<li>kein Schritt hat diese Person eingeplant</li>';
-    out+='</ul><div class="hints">'+hl([e.got>=e.need?"ok":"warn","Ergebnis: "+e.got+" × 20 h = "+e.got*20+" h, Ziel "+e.need+" Dienste ("+sollOf(p)+" h)"])+hp.map(hl).join("")+'</div>'});
+    out+='</ul><div class="hints">'+hl([(eff(p,"rest")?e.h>=e.ziel-10:Math.abs(e.h-e.ziel)<=10)?"ok":"warn","Ergebnis: "+e.got+" Dienste = "+e.h+" h im Plan, Ziel "+e.ziel+" h"+(e.zw?" ("+e.zw+")":"")+" – Monatsletzter zählt 5 h"])+hp.map(hl).join("")+'</div>'});
   el.innerHTML=out}
 
 /* ---------- Vorgaben-Tab ---------- */

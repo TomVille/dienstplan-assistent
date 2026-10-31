@@ -137,3 +137,85 @@ test("PDF-Export: gültige Struktur, xref-Offsets stimmen, Umlaute als WinAnsi",
   const len = +s.match(/\/Length (\d+)/)[1], st = s.indexOf("stream\n") + 7;
   assert.equal(s.slice(st + len, st + len + 10), "\nendstream");
 });
+
+// ---------- strenge Regeln im Vorschlag ----------
+const weKey = (y, m, d) => { const w = new Date(y, m, d).getDay(); return w === 5 ? d + 1 : w === 6 ? d : w === 0 ? d - 1 : null; };
+const isoEven = (y, m, d) => { const t = new Date(Date.UTC(y, m, d)), n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n);
+  return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7) % 2 === 0; };
+function runsOf(plan, pid, N) { const r = []; for (let d = 1; d <= N; d++) if (plan[d] === pid && plan[d - 1] !== pid) { let e = d; while (plan[e + 1] === pid) e++; r.push([d, e]); } return r; }
+// erlaubte Hinweise: leere Tage, Vornacht, Soll nicht erreicht, weiche WE-Empfehlung ohne eigene Regel
+const ALLOWED = [/ohne Besetzung/, /Vormonats unbekannt/, / statt genau /, / h, Ziel /, /möglichst max\. 2/];
+
+for (const [y, m] of [[2026, 10], [2026, 11], [2027, 1], [2027, 3]]) for (const withVg of [false, true]) {
+  test(`Vorschlag ${y}-${m + 1}${withVg ? " mit Vorgaben" : ""}: Regeln werden streng eingehalten`, async () => {
+    const { t } = await loadApp();
+    const c = fresh(t, y, m);
+    if (withVg) c.vg = plain(VG);
+    c.plan = t.vorschlag();
+    const plan = plain(c.plan), N = t.N, s = t.stats();
+    const isT = (pid, [a, b]) => { for (let d = a; d <= b; d++) if (withVg && (VG[pid] || {})[d] === "T") return true; return false; };
+    const dow = (d) => new Date(y, m, d).getDay();
+    if (!withVg) {
+      const bad = t.hints(s).filter((h) => h[0] !== "ok" && !ALLOWED.some((r) => r.test(h[1])));
+      assert.deepEqual(plain(bad), []);
+    }
+    for (const r of runsOf(plan, "steffi", N)) {
+      assert.ok(r[1] - r[0] + 1 <= 4, `Steffi ${r} länger als 4`);
+      if (!isT("steffi", r)) assert.ok(r[1] - r[0] + 1 >= 3, `Steffi ${r} kürzer als 3`);
+    }
+    for (const p of t.S.persons) {
+      if (p.weMax == null) continue;
+      const we = new Set(); for (let d = 1; d <= N; d++) if (plan[d] === p.id && weKey(y, m, d) !== null) we.add(weKey(y, m, d));
+      assert.ok(we.size <= p.weMax, `${p.name} ${we.size} Wochenenden`);
+    }
+    for (const r of runsOf(plan, "laura", N)) if (!isT("laura", r))
+      assert.ok(r[1] - r[0] === 2 && dow(r[0]) === 4 && isoEven(y, m, r[0]), `Laura ${r} ist kein ganzer Do–Sa-Block in gerader KW`);
+    let pairs = 0;
+    for (const r of runsOf(plan, "marie", N)) {
+      if (isT("marie", r)) continue;
+      if (r[1] === r[0] + 1 && dow(r[0]) === 6) { pairs++; continue; }
+      assert.ok(r[0] === r[1] && dow(r[0]) >= 1 && dow(r[0]) <= 4, `Marie ${r} ist kein Einzeldienst Mo–Do`);
+    }
+    assert.ok(pairs <= 1, `Marie ${pairs} Sa+So-Paare`);
+    // niemand außer „füllt Rest“ über dem gerundeten Ziel (mehr als einen halben Dienst bzw. halben Muster-Block drüber)
+    for (const p of t.S.persons) if (!p.rest) assert.ok(s[p.id].h - t.sollOf(p) < (p.muster ? p.muster.len * 10 : 10), `${p.name} ${s[p.id].h} h bei Soll ${t.sollOf(p)}`);
+  });
+}
+
+test("Stundenziel: auf den nächsten ganzen Dienst gerundet, mit Übertrag und Vornacht", async () => {
+  const { t } = await loadApp();
+  for (const p of t.S.persons) if (p.id !== "stine") p.aktiv = false;
+  // Dezember 2026: 20 h je Dienst, der 31. zählt 5 h. [Übertrag, Vornacht, nächstmögliche Plan-Stunden]
+  // 168 → 165 (8×20+5); 168+12 = 180 → 180; 168−30 = 138 → 140; 168−5−15 = 148 → 145
+  for (const [ueb, pn, want] of [[0, "", 165], [-12, "", 180], [30, "", 140], [5, "stine", 145]]) {
+    const c = fresh(t, 2026, 11);
+    c.uebertrag = { stine: ueb }; c.prevNight = pn;
+    c.plan = t.vorschlag();
+    const h = t.stats().stine.h - (pn ? 15 : 0);
+    assert.equal(h, want, `Übertrag ${ueb}, Vornacht ${pn || "-"}`);
+  }
+});
+
+test("Hinweis: Sa+So am Stück ist bei „nur als Sa+So“ kein Verstoß gegen Einzeldienste", async () => {
+  const { t } = await loadApp();
+  const c = fresh(t, 2026, 10); // 7./8. November 2026 = Sa/So
+  c.plan = { 7: "marie", 8: "marie", 10: "marie" };
+  const w = () => t.hints(t.stats()).map((h) => h[1]).filter((x) => x.includes("Marie hat mehr als einen Dienst"));
+  assert.deepEqual(plain(w()), []);
+  c.plan = { 10: "marie", 11: "marie" };
+  assert.equal(w().length, 1);
+});
+
+test("Marie: alte Regel Mo–Do bekommt einmalig Sa+So, bewusst entfernt bleibt entfernt", async () => {
+  const KEY = "dienstplan-assistent-v1";
+  const old = { persons: [{ id: "marie", name: "Marie", soll: 144, aktiv: true, runMax: 1, weMax: 1, wePaar: true, weStart: 6, tage: [1, 2, 3, 4], off: {} }], months: {} };
+  let { t } = await loadApp({ store: { [KEY]: JSON.stringify(old) } });
+  const p = t.person("marie");
+  assert.deepEqual(plain(p.tage).sort(), [0, 1, 2, 3, 4, 6]);
+  assert.equal(t.rulesOf(p).fix1, 1, "Merker wird mit den Regeln gespeichert (auch in der Datenbank)");
+  p.tage = [1, 2, 3, 4]; // später bewusst wieder entfernt
+  ({ t } = await loadApp({ store: { [KEY]: JSON.stringify(t.S) } }));
+  assert.deepEqual(plain(t.person("marie").tage), [1, 2, 3, 4]);
+  ({ t } = await loadApp()); // Neuinstallation: Sa+So schon in der Vorlage
+  assert.deepEqual(plain(t.person("marie").tage).sort(), [0, 1, 2, 3, 4, 6]);
+});
