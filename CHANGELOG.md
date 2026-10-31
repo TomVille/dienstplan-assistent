@@ -1,5 +1,8 @@
 # Änderungen
 
+## 1.2.1 (2026-10-31)
+- Sichereres Speichern (alles oder nichts), korrekte Hinweise bei Übertrag, Rückgängig nach Excel-Import holt Notizen zurück, Update-Dialog zeigt Neuerungen
+
 ## 1.2.0 (2026-10-31)
 - Vorschlag hält alle Regeln streng ein (Blocklängen, Wochenenden, Muster, Stundenziel mit Übertrag); Marie mit einem Wochenende Sa+So
 
