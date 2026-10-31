@@ -28,6 +28,16 @@ jobs:
 
       - run: npm ci
 
+      # Abschnitt der neuesten Version aus CHANGELOG.md, erscheint im Update-Dialog der App
+      - name: Release-Text aus CHANGELOG
+        id: notes
+        run: |
+          {
+            echo 'body<<EOF'
+            awk '/^## /{n++} n==1' CHANGELOG.md | tail -n +2
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build, sign updater artifacts and publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -37,7 +47,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Dienstplan-Assistent ${{ github.ref_name }}"
-          releaseBody: "Siehe CHANGELOG.md"
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

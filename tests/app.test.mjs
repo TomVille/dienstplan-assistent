@@ -219,3 +219,120 @@ test("Marie: alte Regel Mo–Do bekommt einmalig Sa+So, bewusst entfernt bleibt 
   ({ t } = await loadApp()); // Neuinstallation: Sa+So schon in der Vorlage
   assert.deepEqual(plain(t.person("marie").tage).sort(), [0, 1, 2, 3, 4, 6]);
 });
+
+// ---------- App-Modus (Tauri + SQLite) ----------
+function fakeTauri({ loadFails } = {}) {
+  const f = { invokes: [], fail: false };
+  const db = { execute: async () => { throw new Error("DB.execute darf zum Speichern nicht mehr benutzt werden"); },
+    select: async (q) => (q.includes("FROM personen") ? [{ id: "stine", name: "Stine", soll: 168, aktiv: 1, regeln: "{}" }] : []) };
+  f.tauri = {
+    sql: { Database: { load: async () => { if (loadFails) throw new Error("kaputt"); return db; } } },
+    core: { invoke: async (cmd, args) => { if (f.fail) throw "Platte voll"; f.invokes.push([cmd, plain(args)]); } },
+  };
+  return f;
+}
+const dienste = (inv) => Object.values(inv[1].data.months).map((m) => m.dienste);
+
+test("Speichern: Monatswechsel direkt nach Änderung – beide Monate landen in EINEM save_data", async () => {
+  const f = fakeTauri();
+  const { t, els, flush } = await loadApp({ tauri: f.tauri });
+  t.assign(3, "stine");
+  els.nextM.L.click[0]();
+  t.assign(4, "stine");
+  assert.equal(f.invokes.length, 0, "erst nach dem Debounce speichern");
+  await flush();
+  assert.equal(f.invokes.length, 1);
+  const [cmd, args] = f.invokes[0];
+  assert.equal(cmd, "save_data");
+  assert.equal(args.data.replace_all, false);
+  assert.deepEqual(args.data.persons.map((p) => p.id), ["stine"]);
+  assert.deepEqual(dienste(f.invokes[0]).sort(), [[[3, "stine"]], [[4, "stine"]]]);
+  assert.match(els.status.textContent, /^Gespeichert/);
+});
+
+test("Speichern: Fehler → Monate bleiben vorgemerkt und werden beim nächsten Mal mitgeschrieben", async () => {
+  const f = fakeTauri();
+  const { t, els, flush } = await loadApp({ tauri: f.tauri });
+  f.fail = true;
+  t.assign(3, "stine");
+  await flush();
+  assert.equal(f.invokes.length, 0);
+  assert.match(els.status.textContent, /Speichern fehlgeschlagen: Platte voll/);
+  f.fail = false;
+  els.nextM.L.click[0]();
+  t.assign(4, "stine");
+  await flush();
+  assert.equal(f.invokes.length, 1);
+  assert.deepEqual(dienste(f.invokes[0]).sort(), [[[3, "stine"]], [[4, "stine"]]]);
+});
+
+test("Datenbank startet nicht: kein Monat, klare Meldung, kein Browser-Speicher", async () => {
+  const f = fakeTauri({ loadFails: true });
+  const { t, els, ls } = await loadApp({ tauri: f.tauri, noInit: true });
+  assert.equal(t.S, undefined);
+  assert.equal(els.rows?.innerHTML || "", "");
+  assert.equal(els.monthLabel?.textContent || "", "");
+  assert.match(els.status.textContent, /Datenbank nicht erreichbar/);
+  assert.equal(ls.calls, 0, "localStorage darf nicht benutzt werden");
+});
+
+// ---------- Hinweise, Rückgängig, Escaping ----------
+test("Hinweis „genau“ rechnet mit Übertrag; jeder Personen-Hinweis trägt die Person-ID", async () => {
+  const { t } = await loadApp();
+  const c = fresh(t, 2026, 10);
+  const stine = t.person("stine");
+  stine.exakt = true;
+  c.ovr = { stine: { soll: 120 } };
+  c.uebertrag = { stine: 20 };
+  c.plan = { 2: "stine", 3: "stine", 4: "stine", 5: "stine", 6: "stine" }; // 5 × 20 h = 100 h, + 20 h Übertrag = 120 h
+  let h = plain(t.hints(t.stats()));
+  assert.ok(!h.some((x) => x[2] === "stine" && x[1].includes("statt genau")), h.map((x) => x[1]).join(" | "));
+  // viele Verstöße verschiedener Personen erzeugen
+  c.vg = { laura: { 10: "T" }, marie: { 12: "U" } };
+  c.plan = { 1: "marie", 2: "marie", 3: "marie", 10: "steffi", 12: "marie", 14: "laura", 20: "stine" };
+  h = plain(t.hints(t.stats()));
+  const names = t.S.persons.map((p) => [p.id, p.name]);
+  let n = 0;
+  for (const x of h) {
+    const hit = names.filter(([, nm]) => x[1].includes(nm));
+    if (!hit.length) continue;
+    n++;
+    assert.ok(hit.some(([id]) => id === x[2]), `Hinweis ohne passende Person-ID: ${JSON.stringify(x)}`);
+  }
+  assert.ok(n >= 4, `zu wenige Personen-Hinweise: ${n}`);
+});
+
+test("Rückgängig nach Excel-Import stellt Notizen wieder her", async () => {
+  const XLSX = { read: () => ({ SheetNames: ["P"], Sheets: { P: {} } }), utils: { sheet_to_json: () => [
+    ["Dienstplan Dezember 2026"], ["Datum", "Tag", "Früh", "Spät", "Nacht", "Notiz"], ["3.", "Do", "", "", "Laura", "neu"]] } };
+  const { t, els } = await loadApp({ XLSX });
+  const c = fresh(t, 2026, 11);
+  c.notes = { 3: "alt", 5: "bleibt" };
+  els.fileXls.files = [{ name: "plan.xlsx" }];
+  els.fileXls.L.change[0].call(els.fileXls);
+  assert.deepEqual(plain(t.cur.notes), { 3: "neu", 5: "bleibt" });
+  els.btnUndo.L.click[0]();
+  assert.deepEqual(plain(t.cur.plan), {});
+  assert.deepEqual(plain(t.cur.notes), { 3: "alt", 5: "bleibt" });
+});
+
+test("Rückgängig nach Zuteilen lässt später bearbeitete Notizen in Ruhe", async () => {
+  const { t, els } = await loadApp();
+  const c = fresh(t, 2026, 10);
+  c.notes = { 1: "a" };
+  t.assign(3, "laura");
+  t.cur.notes[7] = "später";
+  els.btnUndo.L.click[0]();
+  assert.deepEqual(plain(t.cur.plan), {});
+  assert.deepEqual(plain(t.cur.notes), { 1: "a", 7: "später" });
+});
+
+test("Namen werden in der Plantabelle escaped", async () => {
+  const { t, els } = await loadApp();
+  const c = fresh(t, 2026, 10);
+  t.S.persons.push({ id: "x", name: "<b>X", soll: 0, aktiv: true, off: {} });
+  c.plan = { 2: "x", 3: "x" };
+  t.renderPlan();
+  assert.ok(els.rows.innerHTML.includes("&lt;b&gt;X"));
+  assert.ok(!els.rows.innerHTML.includes("<b>X"), "roher Name im HTML");
+});

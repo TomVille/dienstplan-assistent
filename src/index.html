@@ -20302,7 +20302,6 @@ table.set input{width:90px}
       <h3 style="margin-top:16px" id="updHead" hidden>Programm-Updates</h3>
       <p class="caption" id="updInfo" hidden></p>
       <div class="toolbar" style="margin-top:8px" id="updRow" hidden><button id="btnUpdate" type="button">Jetzt auf Updates prüfen</button></div>
-      <p class="caption" style="margin-top:12px" hidden>Vorschlag-Reihenfolge nach Rolle: Termine → Laura-Rolle (Do–Sa, gerade KW) → Stine-Rolle (bis 3 Phasen, max. 4 am Stück, ein Wochenende) → Einzeldienste Mo–Do → Blöcke von 3–4 → Rest-Rolle (alles Übrige). Neue Personen bekommen je nach Soll automatisch Einzeldienste (bis 40 h, an jedem Wochentag, auch am Wochenende) oder Blöcke; die Rolle lässt sich in der Tabelle ändern.</p>
     </div>
   </div>
 </div>
@@ -20343,27 +20342,25 @@ async function dbLoad(){
   (await DB.select("SELECT monat,tag,text FROM notizen")).forEach(function(r){mo(r.monat).notes[r.tag]=r.text});
   (await DB.select("SELECT monat,person,feld,wert FROM abweichungen")).forEach(function(r){var m=mo(r.monat);m.ovr[r.person]=m.ovr[r.person]||{};m.ovr[r.person][r.feld]=+r.wert});
   return o.persons.length?o:null}
-async function dbSaveAll(o){await DB.execute("BEGIN");try{
-  await DB.execute("DELETE FROM personen");await DB.execute("DELETE FROM monate");await DB.execute("DELETE FROM dienste");await DB.execute("DELETE FROM vorgaben");await DB.execute("DELETE FROM notizen");await DB.execute("DELETE FROM abweichungen");
-  for(var i=0;i<o.persons.length;i++)await dbSavePerson(o.persons[i],i);
-  for(var k in o.months)await dbSaveMonth(k,o.months[k]);
-  await DB.execute("COMMIT")}catch(e){await DB.execute("ROLLBACK");throw e}}
-async function dbSavePerson(p,i){await DB.execute("INSERT OR REPLACE INTO personen (id,name,soll,aktiv,reihenfolge,regeln) VALUES ($1,$2,$3,$4,$5,$6)",[p.id,p.name,p.soll,p.aktiv?1:0,i,JSON.stringify(rulesOf(p))])}
-async function dbSaveMonth(k,m){var d,pid;
-  await DB.execute("INSERT OR REPLACE INTO monate (monat,vornacht,uebertrag) VALUES ($1,$2,$3)",[k,m.prevNight||null,JSON.stringify(m.uebertrag||{})]);
-  await DB.execute("DELETE FROM dienste WHERE monat=$1",[k]);for(d in m.plan)if(m.plan[d])await DB.execute("INSERT INTO dienste (monat,tag,person) VALUES ($1,$2,$3)",[k,+d,m.plan[d]]);
-  await DB.execute("DELETE FROM vorgaben WHERE monat=$1",[k]);for(pid in m.vg||{})for(d in m.vg[pid])if(m.vg[pid][d])await DB.execute("INSERT INTO vorgaben (monat,person,tag,art,stichwort) VALUES ($1,$2,$3,$4,$5)",[k,pid,+d,m.vg[pid][d],((m.termin||{})[pid]||{})[d]||null]);
-  await DB.execute("DELETE FROM notizen WHERE monat=$1",[k]);for(d in m.notes||{})if(m.notes[d])await DB.execute("INSERT INTO notizen (monat,tag,text) VALUES ($1,$2,$3)",[k,+d,m.notes[d]]);
-  await DB.execute("DELETE FROM abweichungen WHERE monat=$1",[k]);for(pid in m.ovr||{})for(var f in m.ovr[pid])if(m.ovr[pid][f]!==undefined&&m.ovr[pid][f]!==null&&m.ovr[pid][f]!=="")await DB.execute("INSERT INTO abweichungen (monat,person,feld,wert) VALUES ($1,$2,$3,$4)",[k,pid,f,+m.ovr[pid][f]])}
+// Speichern über den Rust-Befehl save_data: alles in EINER echten SQLite-Transaktion (BEGIN/COMMIT über DB.execute läuft im Pool evtl. auf verschiedenen Verbindungen)
+function dbMonthRow(m){var d,pid,f,r={vornacht:m.prevNight||null,uebertrag:JSON.stringify(m.uebertrag||{}),dienste:[],vorgaben:[],notizen:[],abweichungen:[]};
+  for(d in m.plan)if(m.plan[d])r.dienste.push([+d,m.plan[d]]);
+  for(pid in m.vg||{})for(d in m.vg[pid])if(m.vg[pid][d])r.vorgaben.push([pid,+d,m.vg[pid][d],((m.termin||{})[pid]||{})[d]||null]);
+  for(d in m.notes||{})if(m.notes[d])r.notizen.push([+d,m.notes[d]]);
+  for(pid in m.ovr||{})for(f in m.ovr[pid])if(m.ovr[pid][f]!==undefined&&m.ovr[pid][f]!==null&&m.ovr[pid][f]!=="")r.abweichungen.push([pid,f,+m.ovr[pid][f]]);
+  return r}
+function dbWrite(persons,months,all){var ms={};for(var k in months)ms[k]=dbMonthRow(months[k]);
+  return T.core.invoke("save_data",{data:{replace_all:all,months:ms,persons:persons.map(function(p,i){return{id:p.id,name:p.name,soll:+p.soll||0,aktiv:!!p.aktiv,reihenfolge:i,regeln:JSON.stringify(rulesOf(p))}})}})}
+function dbSaveAll(o){return dbWrite(o.persons,o.months,true)}
 var saveTimer=null,saving=false,dirtyAgain=false,dirtyMonths={};
 function save(){
   if(!DB){try{localStorage.setItem(KEY,JSON.stringify(S));status("Gespeichert "+new Date().toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}))}catch(e){status("Speichern im Browser nicht möglich – bitte Sicherung nutzen.",true)}return}
   dirtyMonths[key(Y,M)]=cur; // Monat sofort merken, sonst speichert der Timer nach einem Monatswechsel den falschen
   clearTimeout(saveTimer);saveTimer=setTimeout(saveNow,250)}
 async function saveNow(){if(saving){dirtyAgain=true;return}saving=true;var q=dirtyMonths;dirtyMonths={};
-  try{await DB.execute("BEGIN");await DB.execute("DELETE FROM personen");for(var i=0;i<S.persons.length;i++)await dbSavePerson(S.persons[i],i);for(var k in q)await dbSaveMonth(k,q[k]);await DB.execute("COMMIT");
+  try{await dbWrite(S.persons,q,false);
     status("Gespeichert "+new Date().toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}))}
-  catch(e){try{await DB.execute("ROLLBACK")}catch(e2){}for(var k2 in q)if(!dirtyMonths[k2])dirtyMonths[k2]=q[k2];status("Speichern fehlgeschlagen: "+(e&&e.message||e),true)}
+  catch(e){for(var k2 in q)if(!dirtyMonths[k2])dirtyMonths[k2]=q[k2];status("Speichern fehlgeschlagen: "+(e&&e.message||e),true)}
   saving=false;if(dirtyAgain){dirtyAgain=false;saveNow()}}
 async function initStore(){
   var info=document.getElementById("storeInfo");
@@ -20372,7 +20369,7 @@ async function initStore(){
       if(!o){var loc=loadLocal();o=normalize(loc||JSON.parse(JSON.stringify(DEF)));await dbSaveAll(o);if(loc)status("Daten aus der Browser-Fassung übernommen.")}
       info.textContent="Alle Daten liegen in der Datei dienstplan.sqlite im Programmdaten-Ordner dieses Rechners. Für eine Kopie oder den Wechsel auf einen anderen Rechner:";
       return normalize(o)}
-    catch(e){DB=null;status("Datenbank nicht erreichbar ("+(e&&e.message||e)+"), es wird im Browser-Speicher gearbeitet.",true)}}
+    catch(e){DB=null;status("Datenbank nicht erreichbar ("+(e&&e.message||e)+"). Bitte das Programm beenden und neu starten – ohne Datenbank würde nichts gespeichert.",true);throw e}}
   return normalize(loadLocal()||JSON.parse(JSON.stringify(DEF)))}
 function key(y,m){return y+"-"+(m<9?"0":"")+(m+1)}
 function month(y,m){var k=key(y,m);if(!S.months[k])S.months[k]={plan:{},vg:{},termin:{},notes:{},uebertrag:{},prevNight:""};var mo=S.months[k];mo.vg=mo.vg||{};mo.termin=mo.termin||{};mo.notes=mo.notes||{};mo.uebertrag=mo.uebertrag||{};return mo}
@@ -20427,12 +20424,12 @@ function hints(s){
   if(empty)h.push(["crit",empty+" Tag"+(empty>1?"e":"")+" ohne Besetzung"]);else h.push(["ok","Alle "+N+" Tage besetzt"]);
   if(!cur.prevNight)h.push(["warn","Nacht am letzten Tag des Vormonats unbekannt – 15 h vom 1. (0–15 Uhr) fehlen in der Rechnung (Einstellungen)"]);
   for(d=1;d<=N;d++){var p=cur.plan[d];if(!p)continue;var v=vg(p,d),v2=vg(p,d+1);
-    if(v==="U"||v==="F")h.push(["crit",pname(p)+" am "+d+". eingeteilt, hat aber "+(v==="U"?"Urlaub":"Wunschfrei")]);
-    else if(v2==="U"||v2==="F")h.push(["crit",pname(p)+" am "+d+". eingeteilt, hat am "+(d+1)+". aber "+(v2==="U"?"Urlaub":"Wunschfrei")+" (Dienst endet 15 Uhr)"]);
-    S.persons.forEach(function(q){if(q.id!==p&&vg(q.id,d)==="T")h.push(["crit","Termin am "+d+". ist für "+q.name+" vorgesehen, eingeteilt ist "+pname(p)])})}
-  for(var dx=1;dx<=N;dx++){var px=cur.plan[dx];if(px&&!isActive(px))h.push(["warn",pname(px)+" am "+dx+". eingeteilt, ist aber pausiert oder nicht im Team"])}
-  active().forEach(function(p){var sx=s[p.id],nm=p.name,soll=sollOf(p),runMax=eff(p,"runMax"),runMin=eff(p,"runMin"),phMax=eff(p,"phasenMax"),weMax=eff(p,"weMax"),mu=eff(p,"muster"),dd;
-    if(eff(p,"exakt")){if(sx.h!==soll)h.push(["warn",nm+" "+sx.h+" h statt genau "+soll+" h"])}
+    if(v==="U"||v==="F")h.push(["crit",pname(p)+" am "+d+". eingeteilt, hat aber "+(v==="U"?"Urlaub":"Wunschfrei"),p]);
+    else if(v2==="U"||v2==="F")h.push(["crit",pname(p)+" am "+d+". eingeteilt, hat am "+(d+1)+". aber "+(v2==="U"?"Urlaub":"Wunschfrei")+" (Dienst endet 15 Uhr)",p]);
+    S.persons.forEach(function(q){if(q.id!==p&&vg(q.id,d)==="T")h.push(["crit","Termin am "+d+". ist für "+q.name+" vorgesehen, eingeteilt ist "+pname(p),q.id])})}
+  for(var dx=1;dx<=N;dx++){var px=cur.plan[dx];if(px&&!isActive(px))h.push(["warn",pname(px)+" am "+dx+". eingeteilt, ist aber pausiert oder nicht im Team",px])}
+  active().forEach(function(p){var sx=s[p.id],nm=p.name,soll=sollOf(p),runMax=eff(p,"runMax"),runMin=eff(p,"runMin"),phMax=eff(p,"phasenMax"),weMax=eff(p,"weMax"),mu=eff(p,"muster"),dd,h0=h.length;
+    if(eff(p,"exakt")){if(sx.ist!==soll)h.push(["warn",nm+" "+sx.ist+" h statt genau "+soll+" h"])}
     else if(!empty&&soll>0&&sx.ist<soll-10)h.push(["warn",nm+" "+sx.ist+" h, Ziel "+(eff(p,"rest")?"mind. ":"")+soll+" h"]);
     var tooLong=false;if(runMax!==null)for(dd=1;dd<=N;dd++)if(cur.plan[dd]===p.id&&cur.plan[dd-1]!==p.id){var e1=dd;while(cur.plan[e1+1]===p.id)e1++;if(e1-dd+1>runMax&&!(eff(p,"wePaar")&&e1===dd+1&&dow(dd)===6))tooLong=true}
     if(tooLong)h.push(["warn",runMax===1?nm+" hat mehr als einen Dienst am Stück (Regel: Einzeldienste)":nm+" mehr als "+runMax+" Dienste am Stück"]);
@@ -20446,7 +20443,8 @@ function hints(s){
     if(eff(p,"wePaar"))for(dd=1;dd<=N;dd++){var w2=dow(dd);if(cur.plan[dd]===p.id&&(w2===6||w2===0||w2===5)){var sa2=w2===6?dd:(w2===0?dd-1:dd+1);if(!(cur.plan[sa2]===p.id&&cur.plan[sa2+1]===p.id)){h.push(["warn",nm+" am Wochenende "+sa2+"./"+(sa2+1)+". nur mit Einzeldienst (Regel: Sa+So am Stück)"]);break}}}
     var bad=[];for(dd=1;dd<=N;dd++)if(cur.plan[dd]===p.id&&!dayOk(p,dd))bad.push(dd+".");if(bad.length)h.push(["warn",nm+" an nicht vorgesehenen Tagen: "+bad.join(" ")]);
     if(mu){var out=[];for(dd=1;dd<=N;dd++)if(cur.plan[dd]===p.id){var st0=dd;while(cur.plan[st0-1]===p.id)st0--;var okk=dow(st0)===mu.start&&(mu.kw==="alle"||(isoWeek(Y,M,st0)%2===0)===(mu.kw==="gerade"));if(!okk&&out.indexOf(st0+".")<0)out.push(st0+".")}
-      if(out.length)h.push(["warn",nm+": Dienstbeginn außerhalb des Musters ("+WDA[mu.start]+", "+mu.kw+" KW) am "+out.join(" ")])}});
+      if(out.length)h.push(["warn",nm+": Dienstbeginn außerhalb des Musters ("+WDA[mu.start]+", "+mu.kw+" KW) am "+out.join(" ")])}
+    for(var z=h0;z<h.length;z++)h[z][2]=p.id});// Person-ID als 3. Feld: das Protokoll ordnet danach zu, nicht nach Namensteilen
   if(h.length===1)h.push(["ok","Keine Regelverstöße"]);
   return h}
 
@@ -20455,8 +20453,8 @@ function renderAll(){renderPlan();renderVg();renderSettings();renderLog()}
 function renderPlan(){
   var tb=document.getElementById("rows"),html="",d;
   for(d=1;d<=N;d++){var w=dow(d),night=cur.plan[d]||"",prev=d===1?(cur.prevNight||""):(cur.plan[d-1]||"");
-    var frueh=prev?pname(prev):"",spaet=night?(night===prev?pname(night):"19 Uhr"):"";
-    var vgs=active().filter(function(p){return vg(p.id,d)}).map(function(p){return p.name.slice(0,2)+":"+vg(p.id,d)}).join(" ");
+    var frueh=prev?esc(pname(prev)):"",spaet=night?(night===prev?esc(pname(night)):"19 Uhr"):"";
+    var vgs=active().filter(function(p){return vg(p.id,d)}).map(function(p){return esc(p.name.slice(0,2))+":"+vg(p.id,d)}).join(" ");
     html+='<tr class="'+(isWe(d)?"we":"")+(night?"":" crit")+'"><td class="d">'+d+'.</td><td class="day">'+WD[w]+(HOL[d]?'<small>'+HOL[d]+'</small>':'')+'</td><td>'+frueh+'</td><td>'+spaet+'</td>'+
       '<td class="drop'+(night?"":" empty")+'" data-day="'+d+'" tabindex="0">'+(night?'<span class="chip p'+(pidx(night)%10)+(isActive(night)?"":" off")+'" draggable="true" data-p="'+night+'" data-from="'+d+'">'+esc(pname(night))+'</span>':'<span class="chip ghost"></span>')+'</td>'+
       '<td class="notiz" data-day="'+d+'" title="Klicken zum Bearbeiten">'+esc(noteFor(d))+'</td><td class="vg">'+vgs+'</td></tr>'}
@@ -20474,7 +20472,7 @@ function konto(){
   var soll=0,ist=0;active().forEach(function(p){soll+=sollOf(p)});for(var kk in s)ist+=s[kk].h;var avail=N*20,dB=avail-soll;
   document.getElementById("bilanz").innerHTML='<dt>Dienste im Monat</dt><dd>'+N+' × 20 h = '+avail+' h</dd><dt>Soll-Summe Team</dt><dd>'+soll+' h</dd><dt>Verplant</dt><dd>'+ist+' h</dd><dt class="sum">Differenz Monat</dt><dd class="sum">'+(dB>0?"+":"")+dB+' h'+(dB<0?" · Urlaub empfehlen":(dB>0?" · zu verteilen (Soll erhöhen oder Aushilfe)":" · passt"))+'</dd>'}
 
-function push(){undo.push(JSON.stringify(cur.plan));if(undo.length>50)undo.shift()}
+function push(withNotes){undo.push(JSON.stringify({plan:cur.plan,notes:withNotes?cur.notes:undefined}));if(undo.length>50)undo.shift()}
 function assign(day,p,from){push();if(from){var old=cur.plan[day];if(old)cur.plan[from]=old;else delete cur.plan[from]}cur.plan[day]=p;renderPlan();save()}
 function bind(){
   Array.prototype.forEach.call(document.querySelectorAll("td.drop"),function(td){var day=+td.dataset.day;
@@ -20606,9 +20604,9 @@ function renderLog(){var el=document.getElementById("vlog");if(!el)return;
   function days(a){return a.slice().sort(function(x,y){return x-y}).join(". ")+"."}
   function hl(x){return '<div class="hint '+x[0]+'"><i></i><span>'+esc(x[1])+'</span></div>'}
   var ps=active().filter(function(p){return VL.per[p.id]}),h=VL.hints||[];
-  var gh=h.filter(function(x){return !ps.some(function(p){return x[1].indexOf(p.name)>=0})});
+  var gh=h.filter(function(x){return !ps.some(function(p){return x[2]===p.id})});
   var out='<h4>Allgemein</h4><div class="hints">'+(VL.gen.length?VL.gen.map(hl).join(""):'<p class="caption">Keine Termine, keine unbesetzten Tage.</p>')+gh.map(hl).join("")+'</div>';
-  ps.forEach(function(p){var e=VL.per[p.id],hp=h.filter(function(x){return x[1].indexOf(p.name)>=0});
+  ps.forEach(function(p){var e=VL.per[p.id],hp=h.filter(function(x){return x[2]===p.id});
     out+='<h4>'+esc(p.name)+' <small>'+esc(e.rules)+' · Ziel '+e.ziel+' h'+(e.grp?' · '+esc(e.grp):'')+'</small></h4><ul>';
     e.ord.forEach(function(s){var st=e.st[s],li=[];
       for(var k in st.put)li.push('gesetzt'+(k===s?'':' ('+esc(k)+')')+': '+days(st.put[k]));
@@ -20690,7 +20688,7 @@ document.getElementById("btnUebertrag").addEventListener("click",function(){var 
 /* ---------- Buttons ---------- */
 document.getElementById("btnVorschlag").addEventListener("click",function(){push();cur.plan=vorschlag();VL.hints=hints(stats());renderPlan();renderLog();save();status("Vorschlag erzeugt. Hinweise rechts zeigen, was von Hand zu klären ist.")});
 document.getElementById("btnLeer").addEventListener("click",function(){push();cur.plan={};renderPlan();save()});
-document.getElementById("btnUndo").addEventListener("click",function(){if(undo.length){cur.plan=JSON.parse(undo.pop());renderPlan();save()}});
+document.getElementById("btnUndo").addEventListener("click",function(){if(undo.length){var u=JSON.parse(undo.pop());cur.plan=u.plan;if(u.notes)cur.notes=u.notes;renderPlan();save()}});
 document.getElementById("prevM").addEventListener("click",function(){save();M===0?setMonth(Y-1,11):setMonth(Y,M-1)});
 document.getElementById("nextM").addEventListener("click",function(){save();M===11?setMonth(Y+1,0):setMonth(Y,M+1)});
 Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(t){t.addEventListener("click",function(){Array.prototype.forEach.call(document.querySelectorAll(".tab"),function(x){x.classList.toggle("on",x===t)});["plan","vorgaben","einst"].forEach(function(id){document.getElementById("tab-"+id).hidden=id!==t.dataset.tab})})});
@@ -20729,7 +20727,7 @@ document.getElementById("fileXls").addEventListener("change",function(){var f=th
       if(ci.notiz>=0){var nt=String(row3[ci.notiz]||"").trim();// Feiertag und Termin-Stichworte hängt der Export selbst an – nicht als Notiz übernehmen, sonst doppelt
         var auto=[HOL[day]];for(var tp in cur.termin)auto.push((cur.termin[tp]||{})[day]);nt=nt.split(/,\s*/).filter(function(x){return x&&auto.indexOf(x)<0}).join(", ");
         if(nt)notes[day]=nt}}
-    push();cur.plan=plan;for(var nd in notes)cur.notes[nd]=notes[nd]; // vorhandene Notizen bleiben, nur Tage mit Notiz in der Datei werden ersetzt
+    push(true);cur.plan=plan;for(var nd in notes)cur.notes[nd]=notes[nd]; // vorhandene Notizen bleiben, nur Tage mit Notiz in der Datei werden ersetzt
 renderPlan();save();status(cnt+" Dienste aus "+f.name+" übernommen"+(found?" ("+MN[tm]+" "+ty+")":"")+".")}catch(err){status("Datei konnte nicht gelesen werden: "+err.message,true)}};rd.readAsArrayBuffer(f)});
 
 /* Word */
@@ -20784,14 +20782,14 @@ async function checkUpdate(manual){var info=document.getElementById("updInfo");
   if(!(T&&T.updater))return;try{info.textContent="Suche nach Updates …";var u=await T.updater.check();
     if(!u){info.textContent="Version "+APP_VERSION+" ist aktuell.";return}
     info.textContent="Version "+u.version+" verfügbar"+(u.body?": "+u.body:"")+". Wird heruntergeladen …";
-    var ok=manual||await T.dialog.ask("Version "+u.version+" ist verfügbar. Jetzt installieren? Das Programm startet danach neu, die Daten bleiben erhalten.",{title:"Update",kind:"info",okLabel:"Installieren",cancelLabel:"Später"});
+    var ok=manual||await T.dialog.ask("Version "+u.version+" ist verfügbar."+(u.body?"\n\nNeu:\n"+u.body:"")+"\n\nJetzt installieren? Das Programm startet danach neu, die Daten bleiben erhalten.",{title:"Update",kind:"info",okLabel:"Installieren",cancelLabel:"Später"});
     if(!ok){info.textContent="Version "+u.version+" verfügbar – später installieren.";return}
     await u.downloadAndInstall();await T.process.relaunch()}
   catch(e){info.textContent="Update-Prüfung nicht möglich: "+(e&&e.message||e)}}
 /* Start */
 document.getElementById("ver").textContent="v"+APP_VERSION;
 initStore().then(function(o){S=o;var now=new Date();var sy=now.getFullYear(),sm=now.getMonth();if(now.getDate()>20){sm++;if(sm>11){sm=0;sy++}}setMonth(sy,sm);
-  if(T&&T.updater){["updHead","updInfo","updRow"].forEach(function(id){document.getElementById(id).hidden=false});document.getElementById("btnUpdate").addEventListener("click",function(){checkUpdate(true)});setTimeout(function(){checkUpdate(false)},1500)}});
+  if(T&&T.updater){["updHead","updInfo","updRow"].forEach(function(id){document.getElementById(id).hidden=false});document.getElementById("btnUpdate").addEventListener("click",function(){checkUpdate(true)});setTimeout(function(){checkUpdate(false)},1500)}},function(){/* Datenbankfehler: steht schon in der Statuszeile, Planen bleibt gesperrt */});
 })();
 </script>
 </body>
