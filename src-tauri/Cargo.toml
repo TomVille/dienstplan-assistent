@@ -1,6 +1,6 @@
 [package]
 name = "dienstplan-assistent"
-version = "1.0.0"
+version = "1.0.1"
 description = "Dienstplan-Assistent – monatlicher Dienstplan mit Vorschlag, Drag & Drop und Stundenkonto"
 authors = ["Thomas Blum"]
 edition = "2021"

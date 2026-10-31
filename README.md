@@ -27,6 +27,6 @@ npm run release -- 1.1.0 "Was ist neu"
 git push && git push origin v1.1.0
 ```
 
-GitHub Actions baut dann die universelle macOS-App, signiert die Update-Datei und legt den Release mit `latest.json` an. Dafür müssen im Repo zwei Secrets gesetzt sein: `TAURI_SIGNING_PRIVATE_KEY` (Inhalt der Datei `.tauri-signing/dienstplan.key`) und `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (leer lassen, wenn der Schlüssel ohne Passwort erzeugt wurde).
+GitHub Actions baut dann die universelle macOS-App, signiert die Update-Datei und legt den Release mit `latest.json` an. Dafür muss im Repo das Secret `TAURI_SIGNING_PRIVATE_KEY` gesetzt sein (Inhalt der Datei `dienstplan.key`; der Schlüssel hat kein Passwort).
 
 Die Oberfläche ist eine einzelne Datei `src/index.html`, die auch ohne App im Browser läuft (dann mit Browser-Speicher statt SQLite). Das Datenbankschema liegt in `src-tauri/migrations/`.
