@@ -4,7 +4,7 @@ import vm from "node:vm";
 
 const HTML = fs.readFileSync(new URL("../src/index.html", import.meta.url), "utf8");
 const EXPOSE = 'window.__t={vorschlag:vorschlag,setMonth:setMonth,stats:stats,hints:hints,sollOf:sollOf,rulesOf:rulesOf,konto:konto,footer:footer,blocked:blocked,pdfBytes:pdfBytes,person:person,prevKey:prevKey,assign:assign,save:save,renderPlan:renderPlan,' +
-  'get S(){return S},get cur(){return cur},get N(){return N},get HOL(){return HOL}};})();';
+  'get S(){return S},get cur(){return cur},get N(){return N},get HOL(){return HOL},get FER(){return FER}};})();';
 
 function el() {
   const e = { innerHTML: "", textContent: "", value: "", hidden: false, dataset: {}, style: {}, className: "", L: {}, files: [],

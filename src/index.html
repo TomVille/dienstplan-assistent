@@ -20185,6 +20185,7 @@ table.plan tr.we td{background:var(--we);color:var(--we-fg)}
 table.plan td.d{width:46px;text-align:right}
 table.plan td.day{width:110px}table.plan td.day small{display:block;font-size:.72rem;line-height:1;color:var(--muted)}
 table.plan tr.we td.day small{color:var(--we-fg)}
+table.plan td.day.fe{box-shadow:inset 4px 0 0 var(--accent)}
 table.plan td.drop{min-width:110px}
 table.plan td.drop.over{box-shadow:inset 0 0 0 2px var(--accent)}
 table.plan td.drop.bad{box-shadow:inset 0 0 0 2px var(--crit)}
@@ -20275,7 +20276,7 @@ table.set input{width:90px}
 <div class="panel" id="tab-vorgaben" hidden>
   <p class="caption">Klick auf eine Zelle wechselt: frei → U (Urlaub) → F (Wunschfrei) → T (Termin, diese Person übernimmt den Dienst) → frei. Urlaub und Wunschfrei sperren auch den Dienststart am Vortag.</p>
   <div class="vorgaben" style="margin-top:10px"><table class="vg" id="vg"></table></div>
-  <div class="legend"><span><i style="background:var(--p1)"></i>U Urlaub</span><span><i style="background:var(--accent-soft)"></i>F Wunschfrei</span><span><i style="background:var(--accent)"></i>T Termin</span><span><i style="background:var(--we)"></i>Sa / So / Feiertag</span></div>
+  <div class="legend"><span><i style="background:var(--p1)"></i>U Urlaub</span><span><i style="background:var(--accent-soft)"></i>F Wunschfrei</span><span><i style="background:var(--accent)"></i>T Termin</span><span><i style="background:var(--we)"></i>Sa / So / Feiertag</span><span><i style="background:var(--accent)"></i>Strich: Schulferien MV</span></div>
   <div class="termine" id="termine"></div>
   <h3 style="margin-top:18px">Nur diesen Monat</h3>
   <p class="caption">Abweichung von den Dauerregeln für diesen Monat, leer = Dauerregel gilt.</p>
@@ -20386,9 +20387,16 @@ function holidays(y,m){ // Mecklenburg-Vorpommern
   function off(days){var d=new Date(E);d.setDate(d.getDate()+days);return d}
   add(new Date(y,0,1),"Neujahr");add(new Date(y,2,8),"Frauentag");add(off(-2),"Karfreitag");add(off(1),"Ostermontag");add(new Date(y,4,1),"Tag der Arbeit");add(off(39),"Christi Himmelfahrt");add(off(50),"Pfingstmontag");add(new Date(y,9,3),"Tag der Dt. Einheit");add(new Date(y,9,31),"Reformationstag");add(new Date(y,11,25),"1. Weihnachtstag");add(new Date(y,11,26),"2. Weihnachtstag");
   return H}
-var HOL={}, N=30;
+// Schulferien MV (allgemein bildende Schulen), Quelle: regierung-mv.de, Ferienverordnung bis 2029/30
+// shortcut: Termine fest eingetragen bis Sommer 2028, danach neue Schuljahre aus regierung-mv.de ergänzen
+var FERIEN=[["2025-12-22","2026-01-05","Weihnachtsferien"],["2026-02-09","2026-02-20","Winterferien"],["2026-03-30","2026-04-08","Osterferien"],["2026-05-15","2026-05-15","Ferientag"],["2026-05-22","2026-05-26","Pfingstferien"],["2026-07-13","2026-08-22","Sommerferien"],
+  ["2026-10-15","2026-10-24","Herbstferien"],["2026-11-26","2026-11-27","Ferientag"],["2026-12-21","2027-01-02","Weihnachtsferien"],["2027-02-08","2027-02-19","Winterferien"],["2027-03-24","2027-04-02","Osterferien"],["2027-05-07","2027-05-07","Ferientag"],["2027-05-14","2027-05-18","Pfingstferien"],["2027-07-05","2027-08-14","Sommerferien"],
+  ["2027-10-14","2027-10-23","Herbstferien"],["2027-12-22","2028-01-04","Weihnachtsferien"],["2028-02-05","2028-02-17","Winterferien"],["2028-02-18","2028-02-18","Ferientag"],["2028-04-12","2028-04-21","Osterferien"],["2028-05-26","2028-05-26","Ferientag"],["2028-06-02","2028-06-06","Pfingstferien"],["2028-06-26","2028-08-05","Sommerferien"]];
+function ferien(y,m){var F={},d,iso;for(d=1;d<=dim(y,m);d++){iso=y+"-"+String(m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+  FERIEN.forEach(function(f){if(iso>=f[0]&&iso<=f[1])F[d]=f[2]})}return F}
+var HOL={}, FER={}, N=30;
 function isWe(d){var w=dow(d);return w===0||w===6||!!HOL[d]}
-function setMonth(y,m){Y=y;M=m;N=dim(y,m);HOL=holidays(y,m);cur=month(y,m);undo=[];selected=null;VL=null;
+function setMonth(y,m){Y=y;M=m;N=dim(y,m);HOL=holidays(y,m);FER=ferien(y,m);cur=month(y,m);undo=[];selected=null;VL=null;
   var pk=prevKey(),pm=S.months[pk];if(!cur.prevNight&&pm){var ld=dim(y+(m===0?-1:0),(m+11)%12);if(pm.plan[ld])cur.prevNight=pm.plan[ld]}
   document.getElementById("monthLabel").textContent=MN[m]+" "+y;renderAll()}
 function prevKey(){return M===0?key(Y-1,11):key(Y,M-1)}
@@ -20455,7 +20463,7 @@ function renderPlan(){
   for(d=1;d<=N;d++){var w=dow(d),night=cur.plan[d]||"",prev=d===1?(cur.prevNight||""):(cur.plan[d-1]||"");
     var frueh=prev?esc(pname(prev)):"",spaet=night?(night===prev?esc(pname(night)):"19 Uhr"):"";
     var vgs=active().filter(function(p){return vg(p.id,d)}).map(function(p){return esc(p.name.slice(0,2))+":"+vg(p.id,d)}).join(" ");
-    html+='<tr class="'+(isWe(d)?"we":"")+(night?"":" crit")+'"><td class="d">'+d+'.</td><td class="day">'+WD[w]+(HOL[d]?'<small>'+HOL[d]+'</small>':'')+'</td><td>'+frueh+'</td><td>'+spaet+'</td>'+
+    html+='<tr class="'+(isWe(d)?"we":"")+(night?"":" crit")+'"><td class="d">'+d+'.</td><td class="day'+(FER[d]?" fe":"")+'">'+WD[w]+(HOL[d]?'<small>'+HOL[d]+'</small>':'')+(FER[d]?'<small>'+FER[d]+'</small>':'')+'</td><td>'+frueh+'</td><td>'+spaet+'</td>'+
       '<td class="drop'+(night?"":" empty")+'" data-day="'+d+'" tabindex="0">'+(night?'<span class="chip p'+(pidx(night)%10)+(isActive(night)?"":" off")+'" draggable="true" data-p="'+night+'" data-from="'+d+'">'+esc(pname(night))+'</span>':'<span class="chip ghost"></span>')+'</td>'+
       '<td class="notiz" data-day="'+d+'" title="Klicken zum Bearbeiten">'+esc(noteFor(d))+'</td><td class="vg">'+vgs+'</td></tr>'}
   tb.innerHTML=html;

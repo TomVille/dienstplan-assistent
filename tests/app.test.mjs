@@ -336,3 +336,15 @@ test("Namen werden in der Plantabelle escaped", async () => {
   assert.ok(els.rows.innerHTML.includes("&lt;b&gt;X"));
   assert.ok(!els.rows.innerHTML.includes("<b>X"), "roher Name im HTML");
 });
+
+test("Schulferien MV werden für den Monat erkannt", async () => {
+  const { t } = await loadApp();
+  t.setMonth(2026, 9); // Oktober 2026
+  assert.equal(t.FER[14], undefined);
+  assert.equal(t.FER[15], "Herbstferien");
+  assert.equal(t.FER[24], "Herbstferien");
+  assert.equal(t.FER[25], undefined);
+  t.setMonth(2027, 0); // Januar 2027: Weihnachtsferien über den Jahreswechsel
+  assert.equal(t.FER[2], "Weihnachtsferien");
+  assert.equal(t.FER[3], undefined);
+});
